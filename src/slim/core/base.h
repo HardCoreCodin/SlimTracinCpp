@@ -261,6 +261,9 @@ INLINE_XPU void swap(T *a, T *b) {
     *b = t;
 }
 
+INLINE_XPU bool isOnCheckerboard(f32 u, f32 v, u8 steps = 4) {
+    return (u8)(v * (f32)steps) % 2 == (u8)(u * (f32)steps) % 2;
+}
 
 template <typename T>
 struct RangeOf {
@@ -389,10 +392,57 @@ enum GeometryType {
     GeometryType_Tetrahedron,
     GeometryType_Quad,
     GeometryType_Sphere,
+    GeometryType_Light,
 
     GeometryType_Count
 };
 
+enum BoxSide {
+    BoxSide_None   = 0,
+    BoxSide_Left   = 1,
+    BoxSide_Bottom = 2,
+    BoxSide_Back   = 4,
+    BoxSide_Right  = 8,
+    BoxSide_Top    = 16,
+    BoxSide_Front  = 32
+};
+
+struct Sides {
+    union {
+        u8 mask;
+        struct {
+            unsigned int left:1;
+            unsigned int bottom:1;
+            unsigned int back:1;
+            unsigned int right:1;
+            unsigned int top:1;
+            unsigned int front:1;
+        };
+    };
+
+    INLINE_XPU Sides() : mask{0} {}
+
+    INLINE_XPU Sides(f32 x, f32 y, f32 z) :
+        left{signbit(x)},
+        bottom{signbit(y)},
+        back{signbit(z)},
+        right{!signbit(x)},
+        top{!signbit(y)},
+        front{!signbit(z)}
+    {}
+
+    INLINE_XPU void flip() {
+        mask = ~mask;
+    }
+};
+
+enum RenderMode {
+    RenderMode_Normals,
+    RenderMode_Beauty,
+    RenderMode_Depth,
+    RenderMode_MipLevel,
+    RenderMode_UVs
+};
 
 enum Axis {
     Axis_X = 1,
@@ -400,25 +450,31 @@ enum Axis {
     Axis_Z = 4
 };
 
-enum BoxSide {
-    BoxSide_None = 0,
-    BoxSide_Top  = 1,
-    BoxSide_Bottom = 2,
-    BoxSide_Left   = 4,
-    BoxSide_Right  = 8,
-    BoxSide_Front  = 16,
-    BoxSide_Back   = 32
-};
+struct OctantShifts {
+    unsigned int x:2;
+    unsigned int y:2;
+    unsigned int z:2;
 
-enum RenderMode {
-    RenderMode_Normals,
-    RenderMode_Beauty,
-    RenderMode_Depth,
-    RenderMode_UVs
-};
+    INLINE_XPU OctantShifts() : x{0}, y{0}, z{0} {}
 
-struct SphereHit {
-    f32 b, c, t_near, t_far, furthest, closest_hit_distance, closest_hit_density;
+    INLINE_XPU OctantShifts(Sides sides) :
+            x{(unsigned int)(3 * sides.left)},
+            y{(unsigned int)(3 * sides.bottom)},
+            z{(unsigned int)(3 * sides.back)}
+    {
+//        x = (unsigned int)(3 * sides.left);
+//                y = (unsigned int)(3 * sides.bottom);
+//                z = (unsigned int)(3 * sides.back);
+
+    }
+
+    INLINE_XPU BoxSide getBoxSide(Axis axis) const {
+        return (BoxSide)(
+                (axis == Axis_X) << x |
+                (axis == Axis_Y) << y |
+                (axis == Axis_Z) << z
+        );
+    }
 };
 
 template <class T>
@@ -542,6 +598,96 @@ struct ByteColor {
         A{(u8)(value >> 24)} {}
 };
 
+// Filmic Tone-Mapping: https://www.slideshare.net/naughty_dog/lighting-shading-by-john-hable
+// ====================
+// A = Shoulder Strength (i.e: 0.22)
+// B = Linear Strength   (i.e: 0.3)
+// C = Linear Angle      (i.e: 0.1)
+// D = Toe Strength      (i.e: 0.2)
+// E = Toe Numerator     (i.e: 0.01)
+// F = Toe Denumerator   (i.e: 0.3)
+// LinearWhite = Linear White Point Value (i.e: 11.2)
+//   Note: E/F = Toe Angle
+//   Note: i.e numbers are NOT gamma corrected(!)
+//
+// f(x) = ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F))-E/F
+//
+// FinalColor = f(LinearColor)/f(LinearWhite)
+//
+// i.e:
+// x = max(0, LinearColor-0.004)
+// GammaColor = (x*(6.2*x + 0.5))/(x*(6.2*x+1.7) + 0.06)
+//
+// A = 6.2
+// B = 1.7
+//
+// C*B = 1/2
+// D*F = 0.06
+// D*E = 0
+//
+// C = 1/2*1/B = 1/2*1/1.7 = 1/(2*1.7) = 1/3.4 =
+// D = 1
+// F = 0.06
+// E = 0
+
+#define TONE_MAP__SHOULDER_STRENGTH 6.2f
+#define TONE_MAP__TOE_STRENGTH 1
+#define TONE_MAP__TOE_NUMERATOR 0
+#define TONE_MAP__TOE_DENOMINATOR 1
+#define TONE_MAP__TOE_ANGLE (TONE_MAP__TOE_NUMERATOR / TONE_MAP__TOE_DENOMINATOR)
+#define TONE_MAP__LINEAR_ANGLE (1.0f/3.4f)
+#define TONE_MAP__LINEAR_WHITE 1
+#define TONE_MAP__LINEAR_STRENGTH 1
+// LinearWhite = 1:
+// f(LinearWhite) = f(1)
+// f(LinearWhite) = (A + C*B + D*E)/(A + B + D*F) - E/F
+#define TONE_MAPPED__LINEAR_WHITE ( \
+    (                               \
+        TONE_MAP__SHOULDER_STRENGTH + \
+        TONE_MAP__LINEAR_ANGLE * TONE_MAP__LINEAR_STRENGTH + \
+        TONE_MAP__TOE_STRENGTH * TONE_MAP__TOE_NUMERATOR \
+    ) / (                           \
+        TONE_MAP__SHOULDER_STRENGTH + TONE_MAP__LINEAR_STRENGTH + \
+        TONE_MAP__TOE_STRENGTH * TONE_MAP__TOE_DENOMINATOR  \
+    ) - TONE_MAP__TOE_ANGLE \
+)
+
+INLINE_XPU f32 toneMapped(f32 LinearColor) {
+    f32 x = LinearColor - 0.004f;
+    if (x < 0.0f) x = 0.0f;
+    f32 x2 = x*x;
+    f32 x2_times_sholder_strength = x2 * TONE_MAP__SHOULDER_STRENGTH;
+    f32 x_times_linear_strength   =  x * TONE_MAP__LINEAR_STRENGTH;
+    return (
+                   (
+                           (
+                                   x2_times_sholder_strength + x*x_times_linear_strength + TONE_MAP__TOE_STRENGTH*TONE_MAP__TOE_NUMERATOR
+                           ) / (
+                                   x2_times_sholder_strength +   x_times_linear_strength + TONE_MAP__TOE_STRENGTH*TONE_MAP__TOE_DENOMINATOR
+                           )
+                   ) - TONE_MAP__TOE_ANGLE
+           ) / (TONE_MAPPED__LINEAR_WHITE);
+}
+
+
+INLINE_XPU f32 gammaCorrected(f32 x) {
+    return (x <= 0.0031308f ? (x * 12.92f) : (1.055f * powf(x, 1.0f/2.4f) - 0.055f));
+}
+
+INLINE_XPU f32 gammaCorrectedApproximately(f32 x) {
+    return powf(x, 1.0f/2.2f);
+}
+INLINE_XPU f32 toneMappedBaked(f32 LinearColor) {
+    // x = max(0, LinearColor-0.004)
+    // GammaColor = (x*(6.2*x + 0.5))/(x*(6.2*x+1.7) + 0.06)
+    // GammaColor = (x*x*6.2 + x*0.5)/(x*x*6.2 + x*1.7 + 0.06)
+
+    f32 x = LinearColor - 0.004f;
+    if (x < 0.0f) x = 0.0f;
+    f32 x2_times_sholder_strength = x * x * 6.2f;
+    return (x2_times_sholder_strength + x*0.5f)/(x2_times_sholder_strength + x*1.7f + 0.06f);
+}
+
 struct Color {
     union {
         struct { f32 red, green, blue; };
@@ -549,12 +695,13 @@ struct Color {
         f32 components[3];
     };
 
+    INLINE_XPU Color() : r{0.0f}, g{0.0f}, b{0.0f} {}
     INLINE_XPU Color(u8 R, u8 G, u8 B) : red{(f32)R * COLOR_COMPONENT_TO_FLOAT}, green{(f32)G * COLOR_COMPONENT_TO_FLOAT}, blue{(f32)B * COLOR_COMPONENT_TO_FLOAT} {}
     INLINE_XPU Color(ByteColor byte_color) : Color{byte_color.R, byte_color.G, byte_color.B} {}
     INLINE_XPU Color(u32 value) : Color{ByteColor{value}} {}
     INLINE_XPU Color(f32 value) : red{value}, green{value}, blue{value} {}
-    INLINE_XPU Color(f32 red = 0.0f, f32 green = 0.0f, f32 blue = 0.0f) : red{red}, green{green}, blue{blue} {}
-    INLINE_XPU Color(enum ColorID color_id) : Color{} {
+    INLINE_XPU Color(f32 red, f32 green, f32 blue) : red{red}, green{green}, blue{blue} {}
+    INLINE_XPU Color(enum ColorID color_id) : Color{0.0f} {
         switch (color_id) {
             case Black: break;
             case White:
@@ -655,6 +802,17 @@ struct Color {
         }
     }
 
+    INLINE_XPU Color& operator = (f32 value) {
+        r = g = b = value;
+        return *this;
+    }
+
+    INLINE_XPU void applyToneMapping() {
+        r = toneMappedBaked(r);
+        g = toneMappedBaked(g);
+        b = toneMappedBaked(b);
+    }
+
     INLINE_XPU void applyGamma(f32 gamma = 2.2f) {
         r = powf(r, gamma);
         g = powf(g, gamma);
@@ -683,11 +841,6 @@ struct Color {
         r = (float)((0xFF0000 & hex) >> 16) * COLOR_COMPONENT_TO_FLOAT;
         g = (float)((0x00FF00 & hex) >>  8) * COLOR_COMPONENT_TO_FLOAT;
         b = (float)( 0x0000FF & hex)        * COLOR_COMPONENT_TO_FLOAT;
-    }
-
-    INLINE_XPU Color& operator = (f32 value) {
-        r = g = b = value;
-        return *this;
     }
 
     INLINE_XPU Color& operator = (ColorID color_id) {
@@ -838,7 +991,55 @@ struct Color {
                 fast_mul_add(b, factor, to_be_added.b)
         };
     }
+
+    INLINE_XPU Color scaleAdd(f32 factor, f32 to_be_added) const {
+        return {
+                fast_mul_add(r, factor, to_be_added),
+                fast_mul_add(g, factor, to_be_added),
+                fast_mul_add(b, factor, to_be_added)
+        };
+    }
+
+    INLINE_XPU Color mulAdd(const Color &factors, const Color &to_be_added) const {
+        return {
+                fast_mul_add(r, factors.r, to_be_added.r),
+                fast_mul_add(g, factors.g, to_be_added.g),
+                fast_mul_add(b, factors.b, to_be_added.b)
+        };
+    }
 };
+
+INLINE_XPU Color operator - (f32 lhs, const Color &rhs) {
+    return {
+            lhs - rhs.r,
+            lhs - rhs.g,
+            lhs - rhs.b
+    };
+}
+
+INLINE_XPU Color operator + (f32 lhs, const Color &rhs) {
+    return {
+            lhs + rhs.r,
+            lhs + rhs.g,
+            lhs + rhs.b
+    };
+}
+
+INLINE_XPU Color operator / (f32 lhs, const Color &rhs) {
+    return {
+            lhs / rhs.r,
+            lhs / rhs.g,
+            lhs / rhs.b
+    };
+}
+
+INLINE_XPU Color operator * (f32 lhs, const Color &rhs) {
+    return {
+            lhs * rhs.r,
+            lhs * rhs.g,
+            lhs * rhs.b
+    };
+}
 
 struct Pixel {
     Color color;

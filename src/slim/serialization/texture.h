@@ -66,21 +66,20 @@ u32 getTotalMemoryForTextures(String *texture_files, u32 texture_count) {
 }
 
 struct TexturePack {
-    TexturePack(u8 count, Texture *textures, char **files, char* adjacent_file, u64 memory_base = Terabytes(3)) {
-        char string_buffer[200];
+    TexturePack(u8 count, Texture *textures, String *texture_files, char **files, char* adjacent_file, u64 memory_base = Terabytes(3)) {
         u32 memory_size{0};
         Texture *texture = textures;
-        for (u32 i = 0; i < count; i++, texture++) {
-            String string = String::getFilePath(files[i], string_buffer, adjacent_file);
-            loadHeader(*texture, string.char_ptr);
+        String *texture_file = texture_files;
+        for (u32 i = 0; i < count; i++, texture++, texture_file++) {
+            *texture_file = String::getFilePath(files[i], texture_file->char_ptr, adjacent_file);
+            loadHeader(*texture, texture_file->char_ptr);
             memory_size += getSizeInBytes(*texture);
         }
         memory::MonotonicAllocator memory_allocator{memory_size, memory_base};
 
         texture = textures;
-        for (u32 i = 0; i < count; i++, texture++) {
-            String string = String::getFilePath(files[i], string_buffer, adjacent_file);
-            load(*texture, string.char_ptr, &memory_allocator);
-        }
+        texture_file = texture_files;
+        for (u32 i = 0; i < count; i++, texture++, texture_file++)
+            load(*texture, texture_file->char_ptr, &memory_allocator);
     }
 };

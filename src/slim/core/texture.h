@@ -53,15 +53,19 @@ struct Texture : ImageInfo {
         return mip_level;
     }
 
-    XPU static u32 GetMipLevel(u32 width, u32 height, u32 mip_count, f32 uv_area) {
-        return GetMipLevel(uv_area * (f32)(width * height), mip_count);
+    XPU static u32 GetMipLevel(u32 width, u32 height, u32 mip_count, f32 uv_coverage) {
+        return GetMipLevel(uv_coverage * (f32)(width * height), mip_count);
     }
 
-    XPU static u32 GetMipLevel(const Texture &texture, f32 uv_area) {
-        return GetMipLevel(uv_area * (f32)(texture.width * texture.height), texture.mip_count);
+    XPU static u32 GetMipLevel(const Texture &texture, f32 uv_coverage) {
+        return GetMipLevel(uv_coverage * (f32)(texture.width * texture.height), texture.mip_count);
     }
 
-    INLINE_XPU Pixel sample(f32 u, f32 v, f32 uv_area) const {
-        return mips[flags.mipmap ? GetMipLevel(uv_area * (f32)(width * height), mip_count) : 0].sample(u, v);
+    INLINE_XPU u32 mipLevel(f32 uv_coverage) const {
+        return GetMipLevel(uv_coverage * (f32)(width * height), mip_count);
+    }
+
+    INLINE_XPU Pixel sample(f32 u, f32 v, f32 uv_coverage) const {
+        return mips[flags.mipmap ? GetMipLevel(uv_coverage * (f32)(width * height), mip_count) : 0].sample(u, v);
     }
 };

@@ -4638,7 +4638,7 @@ struct Ray {
 
         Axis far_hit_axis;
         f32 far_hit_t = far.minimum(&far_hit_axis);
-        if (far_hit_t < 0) // Further-away hit is behind the ray - intersection can not occur.
+        if (far_hit_t < 0) // Further-away hit is behind the ray - tracers can not occur.
             return BoxSide_None;
 
         Axis near_hit_axis;

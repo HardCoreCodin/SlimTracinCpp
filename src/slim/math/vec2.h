@@ -265,9 +265,9 @@ struct vec2 {
     INLINE_XPU vec2(f32 x, f32 y) noexcept : x(x), y(y) {}
     INLINE_XPU vec2(i32 x, i32 y) noexcept : x((f32)x), y((f32)y) {}
     INLINE_XPU vec2(const vec2 &other) noexcept : vec2{other.x, other.y} {}
-    INLINE_XPU explicit vec2(f32 value) noexcept : vec2{value, value} {}
-    INLINE_XPU explicit vec2(vec2i &other) noexcept : vec2{(f32)other.x, (f32)other.y} {}
-    INLINE_XPU explicit vec2(const vec2i &other) noexcept : vec2{(f32)other.x, (f32)other.y} {}
+    INLINE_XPU vec2(f32 value) noexcept : vec2{value, value} {}
+    INLINE_XPU vec2(vec2i &other) noexcept : vec2{(f32)other.x, (f32)other.y} {}
+    INLINE_XPU vec2(const vec2i &other) noexcept : vec2{(f32)other.x, (f32)other.y} {}
 
     INLINE_XPU bool operator == (const vec2 &other) const {
         return (other.x == x) &&
@@ -597,11 +597,23 @@ struct vec2 {
         };
     }
 
+    INLINE_XPU vec2 scaleAdd(f32 factor, f32 to_be_added) const {
+        return {
+                fast_mul_add(x, factor, to_be_added),
+                fast_mul_add(y, factor, to_be_added)
+        };
+    }
+
     INLINE_XPU vec2 mulAdd(const vec2 &factors, const vec2 &to_be_added) const {
         return {
                 fast_mul_add(x, factors.x, to_be_added.x),
                 fast_mul_add(y, factors.y, to_be_added.y)
         };
+    }
+
+    INLINE_XPU void shiftToNormalized() {
+        x = fast_mul_add(x, 0.5f, 0.5f);
+        y = fast_mul_add(y, 0.5f, 0.5f);
     }
 };
 
@@ -751,3 +763,83 @@ INLINE_XPU vec2 operator * (f32 lhs, const vec2 &rhs) {
 INLINE_XPU vec2 lerp(const vec2 &from, const vec2 &to, f32 by) {
     return (to - from).scaleAdd(by, from);
 }
+
+struct UV : vec2 {
+    INLINE UV() : vec2{1.0f} {}
+    INLINE UV(f32 value) : vec2{value} {}
+
+    INLINE_XPU bool onCheckerboard(u8 steps = 4) const {
+        return isOnCheckerboard(u, v, steps);
+    }
+
+    INLINE_XPU void setByBoxSide(BoxSide side, f32 X, f32 Y, f32 Z) {
+        switch (side) {
+            case BoxSide_Top: {
+                u = X;
+                v = Z;
+            }
+                break;
+            case BoxSide_Bottom: {
+                u = -X;
+                v = -Z;
+            }
+                break;
+            case BoxSide_Left: {
+                u = -Z;
+                v = Y;
+            }
+                break;
+            case BoxSide_Right: {
+                u = Z;
+                v = Y;
+            }
+                break;
+            case BoxSide_Front: {
+                u = X;
+                v = Y;
+            }
+                break;
+            default: {
+                u = -X;
+                v = Y;
+            }
+                break;
+        }
+        shiftToNormalized();
+    }
+
+    INLINE_XPU void setBySphere(f32 X, f32 Y, f32 Z) {
+        f32 z_over_x = 2.0f;
+        f32 y_over_x = 2.0f;
+        if (X != 0.0f) {
+            z_over_x = Z / X;
+            y_over_x = Y / X;
+        }
+        if (z_over_x <=  1.0f &&
+            z_over_x >= -1.0f &&
+            y_over_x <=  1.0f &&
+            y_over_x >= -1.0f) { // Right or Left
+            u = z_over_x;
+            v = X > 0.0f ? y_over_x : -y_over_x;
+        } else {
+            f32 x_over_z = 2.0f;
+            f32 y_over_z = 2.0f;
+
+            if (X != 0.0f) {
+                x_over_z = X / Z;
+                y_over_z = Y / Z;
+            }
+            if (x_over_z <=  1.0f &&
+                x_over_z >= -1.0f &&
+                y_over_z <=  1.0f &&
+                y_over_z >= -1.0f) { // Front or Back:
+                u = -x_over_z;
+                v = Z > 0 ? y_over_z : -y_over_z;
+            } else {
+                u = X / (Y > 0 ? Y : -Y);
+                v = Z / y;
+            }
+        }
+        shiftToNormalized();
+    }
+};

@@ -32,26 +32,41 @@ struct LightsApp : SlimApp {
     Light rim_light{ {2, 5, 12}, {1.0f, 0.25f, 0.25f}, 3.5f * 40.0f};
     Light *lights{&key_light};
 
-    Material floor_material{BRDF_CookTorrance, 0.5f};
+    Material floor_material{BRDF_CookTorrance, 0.5f, 0.0f, MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
     Material *materials{&floor_material};
+
+    char string_buffers[2][200];
+    String texture_files[2]{
+        String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
+        String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
+    };
+
+    Texture floor_albedo_map;
+    Texture floor_normal_map;
+    Texture *textures = &floor_albedo_map;
 
     Geometry plane{{{}, {}, {40, 1, 40}}, GeometryType_Quad};
     Geometry *geometries{&plane};
 
-    SceneCounts counts{1, 1, 3, 1};
-    Scene scene{counts, nullptr, geometries, cameras, lights, materials};
+    SceneCounts counts{1, 1, 3, 1, 2};
+    Scene scene{counts, nullptr, geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 
-    Trace trace{(u8)counts.geometries, scene.mesh_stack_size};
-    RenderMode mode{RenderMode_Beauty};
+    RayTracer ray_tracer{canvas, scene, (u8)counts.geometries, scene.mesh_stack_size};
 
     // Drawing:
     f32 opacity = 0.2f;
 
+    LightsApp() {
+        floor_material.texture_count = 2;
+        floor_material.texture_ids[0] = 0;
+        floor_material.texture_ids[1] = 1;
+    }
+
     void OnRender() override {
         canvas.clear();
 
-        renderScene(&scene, &viewport, &trace, mode);
+        ray_tracer.render(camera);
 
         if (controls::is_pressed::alt)
             drawSelection(selection, viewport, scene);

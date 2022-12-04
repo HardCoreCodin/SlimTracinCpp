@@ -20,6 +20,14 @@ struct vec3 {
     INLINE_XPU vec3(f32 value) noexcept : vec3{value, value, value} {}
     INLINE_XPU vec3(enum ColorID color_id) noexcept : vec3{Color{color_id}} {}
     INLINE_XPU vec3(const Color &color) noexcept : vec3{color.red, color.green, color.blue} {}
+    INLINE_XPU vec3(const Sides sides) noexcept : vec3{
+        1.0f - 2.0f * (f32)sides.left,
+        1.0f - 2.0f * (f32)sides.bottom,
+        1.0f - 2.0f * (f32)sides.back
+    } {}
+    INLINE_XPU Sides facing() const {
+        return Sides{x, y, z};
+    }
 
     INLINE_XPU vec3& operator = (f32 value) {
         x = y = z = value;
@@ -365,12 +373,26 @@ struct vec3 {
         };
     }
 
+    INLINE_XPU vec3 scaleAdd(f32 factor, f32 to_be_added) const {
+        return {
+                fast_mul_add(x, factor, to_be_added),
+                fast_mul_add(y, factor, to_be_added),
+                fast_mul_add(z, factor, to_be_added)
+        };
+    }
+
     INLINE_XPU vec3 mulAdd(const vec3 &factors, const vec3 &to_be_added) const {
         return {
                 fast_mul_add(x, factors.x, to_be_added.x),
                 fast_mul_add(y, factors.y, to_be_added.y),
                 fast_mul_add(z, factors.z, to_be_added.z)
         };
+    }
+
+    INLINE_XPU void shiftToNormalized() {
+        x = fast_mul_add(x, 0.5f, 0.5f);
+        y = fast_mul_add(y, 0.5f, 0.5f);
+        z = fast_mul_add(z, 0.5f, 0.5f);
     }
 };
 

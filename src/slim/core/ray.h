@@ -3,68 +3,44 @@
 #include "../math/vec2.h"
 #include "../math/vec3.h"
 
-enum RayIsFacing {
-    RayIsFacing_Left = 1,
-    RayIsFacing_Down = 2,
-    RayIsFacing_Back = 4
-};
-
 struct RayHit {
     vec3 position, normal;
-    vec2 uv, dUV;
-    f32 distance, distance_squared, cone_angle, cone_width, NdotV, area, uv_area;
+    UV uv;
+    f32 distance, distance_squared, NdotV, uv_coverage_over_surface_area, uv_coverage;
     u32 geo_id, material_id;
     enum GeometryType geo_type = GeometryType_None;
     bool from_behind = false;
 
-    INLINE_XPU bool plane(const vec3 &plane_origin, const vec3 &plane_normal, const vec3 &ray_origin, const vec3 &ray_direction) {
-        f32 NdotRd = plane_normal.dot(ray_direction);
-        if (NdotRd == 0) // The ray is parallel to the plane
-            return false;
+    INLINE_XPU void updateUVCoverage(f32 pixel_area_over_focal_length_squared) {
+        uv_coverage = uv_coverage_over_surface_area * pixel_area_over_focal_length_squared * distance_squared;
+        uv_coverage /= NdotV;
+    };
 
-        f32 NdotRoP = plane_normal.dot(plane_origin - ray_origin);
-        if (NdotRoP == 0) // The ray originated within the plane
-            return false;
-
-        bool ray_is_facing_the_plane = NdotRd < 0;
-        from_behind = NdotRoP > 0;
-        if (from_behind == ray_is_facing_the_plane) // The ray can't hit the plane
-            return false;
-
-        distance = NdotRoP / NdotRd;
-        position = ray_direction.scaleAdd(distance, ray_origin);;
-        normal = plane_normal;
-
-        return true;
-    }
+    INLINE_XPU void updateUV(UV uv_repeat) {
+        uv *= uv_repeat;
+        uv_coverage /= uv_repeat.u * uv_repeat.v;
+    };
 };
 
 struct Ray {
-    struct Octant {
-        unsigned int x:2;
-        unsigned int y:2;
-        unsigned int z:2;
-    };
-
-    RayHit hit;
     vec3 origin, scaled_origin, direction, direction_reciprocal;
-    Octant octant;
+    Sides faces;
+    OctantShifts octant_shifts;
 
     INLINE_XPU vec3 at(f32 t) const { return direction.scaleAdd(t, origin); }
     INLINE_XPU vec3 operator [](f32 t) const { return at(t); }
 
     INLINE_XPU void prePrepRay() {
-        octant.x = signbit(direction.x) ? 3 : 0;
-        octant.y = signbit(direction.y) ? 3 : 0;
-        octant.z = signbit(direction.z) ? 3 : 0;
+        faces = direction.facing();
+        octant_shifts = faces;
         scaled_origin.x = -origin.x * direction_reciprocal.x;
         scaled_origin.y = -origin.y * direction_reciprocal.y;
         scaled_origin.z = -origin.z * direction_reciprocal.z;
     }
 
-    INLINE_XPU bool hitsAABB(const AABB &aabb, f32 closest_distance, f32 *distance) {
-        vec3 min_t{*(&aabb.min.x + octant.x), *(&aabb.min.y + octant.y), *(&aabb.min.z + octant.z)};
-        vec3 max_t{*(&aabb.max.x - octant.x), *(&aabb.max.y - octant.y), *(&aabb.max.z - octant.z)};
+    INLINE_XPU bool hitsAABB(const AABB &aabb, f32 closest_distance, f32 &distance) {
+        vec3 min_t{*(&aabb.min.x + octant_shifts.x), *(&aabb.min.y + octant_shifts.y), *(&aabb.min.z + octant_shifts.z)};
+        vec3 max_t{*(&aabb.max.x - octant_shifts.x), *(&aabb.max.y - octant_shifts.y), *(&aabb.max.z - octant_shifts.z)};
         min_t = min_t.mulAdd(direction_reciprocal, scaled_origin);
         max_t = max_t.mulAdd(direction_reciprocal, scaled_origin);
 
@@ -76,33 +52,78 @@ struct Ray {
         min_t.x = min_t.x > min_t.z ? min_t.x : min_t.z;
         min_t.x = min_t.x > 0 ? min_t.x : 0;
 
-        *distance = min_t.x;
+        distance = min_t.x;
 
         return min_t.x <= max_t.x;
     }
 
-    INLINE_XPU BoxSide hitsCube() {
-        u8 ray_is_facing = 0;
+    INLINE_XPU bool hitsPlane(const vec3 &plane_origin, const vec3 &plane_normal, RayHit &hit) {
+        f32 NdotRd = plane_normal.dot(direction);
+        if (NdotRd == 0) // The ray is parallel to the plane
+            return false;
 
-        if (signbit(direction.x)) ray_is_facing |= RayIsFacing_Left;
-        if (signbit(direction.y)) ray_is_facing |= RayIsFacing_Down;
-        if (signbit(direction.z)) ray_is_facing |= RayIsFacing_Back;
+        f32 NdotRoP = plane_normal.dot(plane_origin - origin);
+        if (NdotRoP == 0) // The ray originated within the plane
+            return false;
 
-        f32 x = ray_is_facing & RayIsFacing_Left ? 1.0f : -1.0f;
-        f32 y = ray_is_facing & RayIsFacing_Down ? 1.0f : -1.0f;
-        f32 z = ray_is_facing & RayIsFacing_Back ? 1.0f : -1.0f;
+        bool ray_is_facing_the_plane = NdotRd < 0;
+        hit.from_behind = NdotRoP > 0;
+        if (hit.from_behind == ray_is_facing_the_plane) // The ray can't hit the plane
+            return false;
 
-        vec3 RD_rcp = 1.0f / direction;
-        vec3 Near{(x - origin.x) * RD_rcp.x,
-                  (y - origin.y) * RD_rcp.y,
-                  (z - origin.z) * RD_rcp.z};
-        vec3 Far{(-x - origin.x) * RD_rcp.x,
-                 (-y - origin.y) * RD_rcp.y,
-                 (-z - origin.z) * RD_rcp.z};
+        hit.distance = NdotRoP / NdotRd;
+        hit.distance_squared = hit.distance * hit.distance;
+        hit.position = at(hit.distance);
+        hit.normal = plane_normal;
+
+        return true;
+    }
+
+    INLINE_XPU bool hitsDefaultQuad(u8 flags, RayHit &hit) {
+        if (direction.y == 0) // The ray is parallel to the plane
+            return false;
+
+        if (origin.y == 0) // The ray start in the plane
+            return false;
+
+        hit.from_behind = origin.y < 0;
+        if (hit.from_behind == direction.y < 0) // The ray can't hit the plane
+            return false;
+
+        hit.distance = fabsf(origin.y * direction_reciprocal.y);
+        hit.position = at(hit.distance);
+
+        if (hit.position.x < -1 ||
+            hit.position.x > +1 ||
+            hit.position.z < -1 ||
+            hit.position.z > +1) {
+            return false;
+        }
+
+        hit.uv.x = hit.position.x;
+        hit.uv.y = hit.position.z;
+        hit.uv.shiftToNormalized();
+
+        if (flags & MATERIAL_HAS_TRANSPARENT_UV && hit.uv.onCheckerboard())
+            return false;
+
+        hit.normal = {0, 1, 0};
+        hit.NdotV = -direction.y;
+        hit.uv_coverage_over_surface_area = 0.25f;
+        hit.distance_squared = hit.distance * hit.distance;
+
+        return true;
+    }
+
+    INLINE_XPU BoxSide hitsDefaultBox(u8 flags, RayHit &hit) {
+        vec3 signed_rcp{faces};
+        signed_rcp *= direction_reciprocal;
+        vec3 Near{scaled_origin - signed_rcp};
+        vec3 Far{scaled_origin + signed_rcp};
 
         Axis far_hit_axis;
         f32 far_hit_t = Far.minimum(&far_hit_axis);
-        if (far_hit_t < 0) // Further-away hit is behind the ray - intersection can not occur.
+        if (far_hit_t < 0) // Further-away hit is behind the ray - tracers can not occur.
             return BoxSide_None;
 
         Axis near_hit_axis;
@@ -110,62 +131,180 @@ struct Ray {
         if (far_hit_t < (near_hit_t > 0 ? near_hit_t : 0))
             return BoxSide_None;
 
-        BoxSide side;
-        f32 t = near_hit_t;
-        hit.from_behind = t < 0; // Near hit is behind the ray, far hit is in front of it: hit is from behind
+        Sides sides{faces};
+        hit.distance = near_hit_t;
+        hit.from_behind = near_hit_t < 0; // Near hit is behind the ray, far hit is in front of it: hit is from behind
         if (hit.from_behind) {
-            t = far_hit_t;
-            switch (far_hit_axis) {
-                case Axis_X : side = ray_is_facing & RayIsFacing_Left ? BoxSide_Left : BoxSide_Right; break;
-                case Axis_Y : side = ray_is_facing & RayIsFacing_Down ? BoxSide_Bottom : BoxSide_Top; break;
-                case Axis_Z : side = ray_is_facing & RayIsFacing_Back ? BoxSide_Back : BoxSide_Front; break;
-            }
-        } else {
-            switch (near_hit_axis) {
-                case Axis_X: side = ray_is_facing & RayIsFacing_Left ? BoxSide_Right : BoxSide_Left; break;
-                case Axis_Y: side = ray_is_facing & RayIsFacing_Down ? BoxSide_Top : BoxSide_Bottom; break;
-                case Axis_Z: side = ray_is_facing & RayIsFacing_Back ? BoxSide_Front : BoxSide_Back; break;
-            }
+            hit.distance = far_hit_t;
+            sides.flip();
         }
 
-        hit.position = at(t);
-        hit.normal = 0.0f;
-        switch (side) {
-            case BoxSide_Left  : hit.normal.x = hit.from_behind ?  1.0f : -1.0f; break;
-            case BoxSide_Right : hit.normal.x = hit.from_behind ? -1.0f :  1.0f; break;
-            case BoxSide_Bottom: hit.normal.y = hit.from_behind ?  1.0f : -1.0f; break;
-            case BoxSide_Top   : hit.normal.y = hit.from_behind ? -1.0f :  1.0f; break;
-            case BoxSide_Back  : hit.normal.z = hit.from_behind ?  1.0f : -1.0f; break;
-            case BoxSide_Front : hit.normal.z = hit.from_behind ? -1.0f :  1.0f; break;
-            default: return BoxSide_None;
+        BoxSide side{(BoxSide)sides.mask};
+        hit.position = at(hit.distance);
+        hit.uv.setByBoxSide(side, hit.position.x, hit.position.y, hit.position.z);
+
+        if (flags & MATERIAL_HAS_TRANSPARENT_UV && hit.uv.onCheckerboard()) {
+            if (hit.from_behind) return BoxSide_None;
+            hit.from_behind = true;
+            sides.flip();
+            side = (BoxSide)sides.mask;
+            hit.distance = far_hit_t;
+            hit.position = at(far_hit_t);
+            hit.uv.setByBoxSide(side, hit.position.x, hit.position.y, hit.position.z);
+            if (hit.uv.onCheckerboard())
+                return BoxSide_None;
+
         }
+
+        hit.normal = sides;
+        hit.normal.shiftToNormalized();
+        hit.NdotV = -hit.normal.dot(direction);
+        hit.distance_squared = hit.distance * hit.distance;
+        hit.uv_coverage_over_surface_area = 0.25f;
 
         return side;
     }
 
-    INLINE_XPU bool hitsPlane(const vec3 &plane_origin, const vec3 &plane_normal) {
-        return hit.plane(plane_origin, plane_normal, origin, direction);
-    }
-};
+    INLINE_XPU bool hitsDefaultSphere(u8 flags, RayHit &hit) {
+        f32 t_to_closest = -origin.dot(direction);
+        if (t_to_closest <= 0)// Ray is aiming away from the sphere
+            return false;
 
-struct Trace {
-    u8 scene_stack_size = 0, mesh_stack_size = 0, depth = 2;
-    u32 *scene_stack = nullptr, *mesh_stack = nullptr;
-    SphereHit sphere_hit;
-    RayHit closest_hit, closest_mesh_hit, current_hit;
-    Ray local_space_ray;
+        hit.distance_squared = origin.squaredLength() - t_to_closest*t_to_closest;
 
-    Trace(u8 scene_stack_size, u8 mesh_stack_size = 0, memory::MonotonicAllocator *memory_allocator = nullptr) :
-        scene_stack_size{scene_stack_size},
-        mesh_stack_size{mesh_stack_size}
-    {
-        memory::MonotonicAllocator temp_allocator;
-        if (!memory_allocator) {
-            temp_allocator = memory::MonotonicAllocator{sizeof(u32) * (mesh_stack_size + scene_stack_size)};
-            memory_allocator = &temp_allocator;
+        f32 delta_squared = 1 - hit.distance_squared;
+        if (delta_squared <= 0) { // Ray missed the sphere
+            hit.distance = t_to_closest;
+            return false;
+        }
+        // Inside the geometry
+        f32 delta = sqrtf(delta_squared);
+
+        hit.distance = t_to_closest - delta;
+        bool has_outer_hit = hit.distance > 0;
+        if (has_outer_hit) {
+            hit.position = at(hit.distance);
+            hit.uv.setBySphere(hit.position.x, hit.position.y, hit.position.z);
+            if (flags & MATERIAL_HAS_TRANSPARENT_UV && hit.uv.onCheckerboard())
+                has_outer_hit = false;
+        }
+        if (!has_outer_hit) {
+            hit.distance = t_to_closest + delta;
+            hit.position = at(hit.distance);
+            hit.uv.setBySphere(hit.position.x, hit.position.y, hit.position.z);
+            if (flags & MATERIAL_HAS_TRANSPARENT_UV && hit.uv.onCheckerboard())
+                has_outer_hit = false;
         }
 
-        mesh_stack = mesh_stack_size ? (u32*)memory_allocator->allocate(sizeof(u32) * mesh_stack_size) : nullptr;
-        scene_stack = (u32*)memory_allocator->allocate(sizeof(u32) * scene_stack_size);
+        hit.from_behind = !has_outer_hit;
+        hit.normal = hit.position;
+        hit.NdotV = -hit.normal.dot(direction);
+        hit.uv_coverage_over_surface_area = UNIT_SPHERE_AREA_OVER_SIX;
+
+        return true;
+    }
+
+    INLINE_XPU bool hitsDefaultTetrahedron(u8 flags, RayHit &hit) {
+        mat3 tangent_matrix;
+        vec3 tangent_pos;
+        vec3 face_normal;
+        bool found_triangle = false;
+        f32 closest_distance = INFINITY;
+
+        const f32 _0577 = 0.577350259f;
+        const f32 _0288 = 0.288675159f;
+
+        RayHit closest_hit;
+
+        for (u8 t = 0; t < 4; t++) {
+            tangent_pos = face_normal = vec3{t == 3 ? _0577 : -_0577};
+            switch (t) {
+                case 0: face_normal.y = _0577; break;
+                case 1: face_normal.x = _0577; break;
+                case 2: face_normal.z = _0577; break;
+                case 3: tangent_pos.y = -_0577; break;
+            }
+
+            if (!hitsPlane(tangent_pos, face_normal, hit))
+                continue;
+
+            switch (t) {
+                case 0:
+                    tangent_matrix.X.x = _0577;
+                    tangent_matrix.X.y = -_0288;
+                    tangent_matrix.X.z = -_0577;
+
+                    tangent_matrix.Y.x = _0288;
+                    tangent_matrix.Y.y = _0288;
+                    tangent_matrix.Y.z = _0577;
+
+                    tangent_matrix.Z.x = -_0288;
+                    tangent_matrix.Z.y = _0577;
+                    tangent_matrix.Z.z = -_0577;
+                    break;
+                case 1:
+                    tangent_matrix.X.x = _0288;
+                    tangent_matrix.X.y = _0288;
+                    tangent_matrix.X.z = _0577;
+
+                    tangent_matrix.Y.x = -_0288;
+                    tangent_matrix.Y.y = _0577;
+                    tangent_matrix.Y.z = -_0577;
+
+                    tangent_matrix.Z.x = _0577;
+                    tangent_matrix.Z.y = -_0288;
+                    tangent_matrix.Z.z = -_0577;
+                    break;
+                case 2:
+                    tangent_matrix.X.x = -_0288;
+                    tangent_matrix.X.y = _0577;
+                    tangent_matrix.X.z = -_0577;
+
+                    tangent_matrix.Y.x = _0577;
+                    tangent_matrix.Y.y = -_0288;
+                    tangent_matrix.Y.z = -_0577;
+
+                    tangent_matrix.Z.x = _0288;
+                    tangent_matrix.Z.y = _0288;
+                    tangent_matrix.Z.z = _0577;
+                    break;
+                case 3:
+                    tangent_matrix.X.x = -_0577;
+                    tangent_matrix.X.y = _0288;
+                    tangent_matrix.X.z = _0577;
+
+                    tangent_matrix.Y.x = _0288;
+                    tangent_matrix.Y.y = _0288;
+                    tangent_matrix.Y.z = _0577;
+
+                    tangent_matrix.Z.x = _0288;
+                    tangent_matrix.Z.y = -_0577;
+                    tangent_matrix.Z.z = _0577;
+                    break;
+            }
+
+            tangent_pos = tangent_matrix * (hit.position - tangent_pos);
+            if (tangent_pos.x < 0 || tangent_pos.y < 0 || tangent_pos.y + tangent_pos.x > 1)
+                continue;
+
+            hit.uv.x = tangent_pos.x;
+            hit.uv.y = tangent_pos.y;
+
+            if ((flags & MATERIAL_HAS_TRANSPARENT_UV) && hit.uv.onCheckerboard())
+                continue;
+
+            if (hit.distance < closest_distance) {
+                closest_distance = hit.distance;
+                closest_hit = hit;
+                closest_hit.uv_coverage_over_surface_area = 4.0f / SQRT3;
+                closest_hit.NdotV = -hit.normal.dot(direction);
+                found_triangle = true;
+            }
+        }
+
+        if (found_triangle)
+            hit = closest_hit;
+
+        return found_triangle;
     }
 };

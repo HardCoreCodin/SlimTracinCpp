@@ -166,38 +166,64 @@ struct Scene {
             bvh_leaf_geometry_indices[i] = bvh_builder->leaf_ids[i];
     }
 
-    INLINE bool castRay(Ray &ray) const {
+    INLINE bool castRay(Ray &ray, RayHit &hit) const {
         static Ray local_ray;
+        static RayHit local_hit;
         static Transform xform;
+        bool found = false;
+        hit.distance_squared = INFINITY;
 
-        bool found{false};
-        bool current_found{false};
-
-        Geometry *geo = geometries;
-
-        for (u32 i = 0; i < counts.geometries; i++, geo++) {
-            xform = geo->transform;
-            if (geo->type == GeometryType_Mesh)
-                xform.scale *= meshes[geo->id].aabb.max;
+        for (u32 i = 0; i < counts.geometries; i++) {
+            Geometry &geo = geometries[i];
+            xform = geo.transform;
+            if (geo.type == GeometryType_Mesh)
+                xform.scale *= meshes[geo.id].aabb.max;
 
             xform.internPosAndDir(ray.origin, ray.direction, local_ray.origin, local_ray.direction);
-
-            current_found = local_ray.hitsCube();
-            if (current_found) {
-                local_ray.hit.position         = xform.externPos(local_ray.hit.position);
-                local_ray.hit.distance_squared = (local_ray.hit.position - ray.origin).squaredLength();
-                if (local_ray.hit.distance_squared < ray.hit.distance_squared) {
-                    ray.hit = local_ray.hit;
-                    ray.hit.geo_type = geo->type;
-                    ray.hit.geo_id = i;
+            local_ray.direction_reciprocal = 1.0f / local_ray.direction;
+            local_ray.prePrepRay();
+            if (local_ray.hitsDefaultBox(0, local_hit)) {
+                local_hit.position         = xform.externPos(local_hit.position);
+                local_hit.distance_squared = (local_hit.position - ray.origin).squaredLength();
+                if (local_hit.distance_squared < hit.distance_squared) {
+                    hit = local_hit;
+                    hit.geo_type = geo.type;
+                    hit.geo_id = i;
                     found = true;
                 }
             }
         }
 
+        if (lights) {
+            for (u32 i = 0; i < counts.lights; i++) {
+                Light &light = lights[i];
+                if (light.is_directional)
+                    continue;
+
+                f32 light_radius = light.intensity * (1.0f / (8.0f * 16.0f));
+                xform.position = light.position_or_direction;
+                xform.scale = light_radius;
+                xform.rotation = {};
+
+                xform.internPosAndDir(ray.origin, ray.direction, local_ray.origin, local_ray.direction);
+                local_ray.direction_reciprocal = 1.0f / local_ray.direction;
+                local_ray.prePrepRay();
+                if (local_ray.hitsDefaultBox(0, local_hit)) {
+                    local_hit.position         = xform.externPos(local_hit.position);
+                    local_hit.distance_squared = (local_hit.position - ray.origin).squaredLength();
+                    if (local_hit.distance_squared < hit.distance_squared) {
+                        hit = local_hit;
+                        hit.geo_type = GeometryType_Light;
+                        hit.geo_id = i;
+                        found = true;
+                    }
+                }
+            }
+        }
+
         if (found) {
-            ray.hit.distance = sqrtf(ray.hit.distance_squared);
-            ray.hit.normal = geometries[ray.hit.geo_id].transform.externDir(ray.hit.normal).normalized();
+            hit.distance = sqrtf(hit.distance_squared);
+            hit.normal = geometries[hit.geo_id].transform.externDir(hit.normal).normalized();
         }
 
         return found;

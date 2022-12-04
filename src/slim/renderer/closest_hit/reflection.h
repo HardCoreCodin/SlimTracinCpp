@@ -1,11 +1,11 @@
 #pragma once
 
-#include "../trace.h"
+#include "../intersection/scene.h"
 #include "../common.h"
 #include "../../scene/scene.h"
 
 
-INLINE vec3 shadeReflection(Ray *ray, Trace *trace, Scene *scene) {
+INLINE vec3 shadeReflection(Ray &ray, Trace &trace, Scene &scene) {
     RayHit *hit = &trace->closest_hit;
     Light *light;
     f32 exp, light_distance, light_distance_squared, NdotL;

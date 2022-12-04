@@ -8,10 +8,16 @@
 void drawSelection(Selection &selection, const Viewport &viewport, const Scene &scene) {
     static Box box;
 
-    if (controls::is_pressed::alt && !mouse::is_captured && selection.geo_type && selection.geometry) {
-        selection.xform = selection.geometry->transform;
-        if (selection.geometry->type == GeometryType_Mesh)
-            selection.xform.scale *= scene.meshes[selection.geometry->id].aabb.max;
+    if (controls::is_pressed::alt && !mouse::is_captured && selection.geo_type) {
+        if (selection.geometry) {
+            selection.xform = selection.geometry->transform;
+            if (selection.geometry->type == GeometryType_Mesh)
+                selection.xform.scale *= scene.meshes[selection.geometry->id].aabb.max;
+        } else {
+            selection.xform.position = scene.lights[selection.geo_id].position_or_direction;
+            selection.xform.scale = scene.lights[selection.geo_id].intensity / 64;
+            selection.xform.rotation = {};
+        }
 
         drawBox(box, selection.xform, viewport, Yellow, 0.5f, 0);
         if (selection.box_side) {
