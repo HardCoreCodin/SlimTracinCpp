@@ -90,7 +90,7 @@ struct Selection {
                     xform.internPosAndDir(ray.origin, ray.direction, local_ray.origin, local_ray.direction);
                     local_ray.direction_reciprocal = 1.0f / local_ray.direction;
                     local_ray.prePrepRay();
-                    box_side = local_ray.hitsDefaultBox(0, local_ray_hit);
+                    box_side = local_ray.hitsDefaultBox(local_ray_hit);
                     if (box_side) {
                         transformation_plane_center = xform.externPos(local_ray_hit.normal);
                         transformation_plane_origin = xform.externPos(local_ray_hit.position);

@@ -259,34 +259,34 @@ struct vec3 {
         };
     }
 
-    INLINE_XPU f32 minimum(Axis *axis = nullptr) const {
-        if (axis) {
-            *axis = Axis_X;
+    INLINE_XPU f32 minimum(BoxSide *side = nullptr) const {
+        if (side) {
             f32 result = x;
+            *side = signbit(x) ? BoxSide_Left : BoxSide_Right;
             if (y < result) {
                 result = y;
-                *axis = Axis_Y;
+                *side = signbit(y) ? BoxSide_Bottom : BoxSide_Top;
             }
             if (z < result) {
                 result = z;
-                *axis = Axis_Z;
+                *side = signbit(z) ? BoxSide_Back : BoxSide_Front;
             }
             return result;
         } else
             return x < y ? (x < z ? x : z) : (y < z ? y : z);
     }
 
-    INLINE_XPU f32 maximum(Axis *axis = nullptr) const {
-        if (axis) {
-            *axis = Axis_X;
+    INLINE_XPU f32 maximum(BoxSide *side = nullptr) const {
+        if (side) {
             f32 result = x;
+            *side = signbit(x) ? BoxSide_Left : BoxSide_Right;
             if (y > result) {
                 result = y;
-                *axis = Axis_Y;
+                *side = signbit(y) ? BoxSide_Bottom : BoxSide_Top;
             }
             if (z > result) {
                 result = z;
-                *axis = Axis_Z;
+                *side = signbit(z) ? BoxSide_Back : BoxSide_Front;
             }
             return result;
         } else

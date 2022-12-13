@@ -182,7 +182,7 @@ struct Scene {
             xform.internPosAndDir(ray.origin, ray.direction, local_ray.origin, local_ray.direction);
             local_ray.direction_reciprocal = 1.0f / local_ray.direction;
             local_ray.prePrepRay();
-            if (local_ray.hitsDefaultBox(0, local_hit)) {
+            if (local_ray.hitsDefaultBox(local_hit)) {
                 local_hit.position         = xform.externPos(local_hit.position);
                 local_hit.distance_squared = (local_hit.position - ray.origin).squaredLength();
                 if (local_hit.distance_squared < hit.distance_squared) {
@@ -208,7 +208,7 @@ struct Scene {
                 xform.internPosAndDir(ray.origin, ray.direction, local_ray.origin, local_ray.direction);
                 local_ray.direction_reciprocal = 1.0f / local_ray.direction;
                 local_ray.prePrepRay();
-                if (local_ray.hitsDefaultBox(0, local_hit)) {
+                if (local_ray.hitsDefaultBox(local_hit)) {
                     local_hit.position         = xform.externPos(local_hit.position);
                     local_hit.distance_squared = (local_hit.position - ray.origin).squaredLength();
                     if (local_hit.distance_squared < hit.distance_squared) {

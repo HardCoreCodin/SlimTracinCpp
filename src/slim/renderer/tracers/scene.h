@@ -7,8 +7,8 @@ struct SceneTracer {
     MeshTracer mesh_tracer{nullptr, 0};
     u32 stack_size = 0;
     u32 *stack = nullptr;
-    Ray local_ray;
-    RayHit local_hit;
+    Ray local_ray, shadow_ray;
+    RayHit local_hit, shadow_hit;
     f32 pixel_area_over_focal_length_squared;
     bool scene_has_emissive_quads = false;
 
@@ -40,10 +40,12 @@ struct SceneTracer {
         return false;
     }
 
-    INLINE_XPU bool inShadow(const vec3 &origin, const vec3 &direction) {
-        local_ray.origin = origin;
-        local_ray.direction = direction;
-        return trace(local_ray, local_hit, true);
+    INLINE_XPU bool inShadow(const vec3 &origin, const vec3 &direction, float max_distance = INFINITY, float max_distance_squared = INFINITY) {
+        shadow_hit.distance = max_distance;
+        shadow_hit.distance_squared = max_distance_squared;
+        shadow_ray.origin = origin;
+        shadow_ray.direction = direction;
+        return trace(shadow_ray, shadow_hit, true);
     }
 
     INLINE_XPU bool trace(Ray &ray, RayHit &hit, bool any_hit = false) {
@@ -140,15 +142,17 @@ struct SceneTracer {
 
             geo.transform.internPosAndDir(ray.origin, ray.direction, local_ray.origin, local_ray.direction);
             local_ray.origin = local_ray.direction.scaleAdd(TRACE_OFFSET, local_ray.origin);
-            local_ray.direction_reciprocal = 1.0f / local_ray.direction;
+            if (geo.type == GeometryType_Mesh || geo.type == GeometryType_Box || geo.type == GeometryType_Quad) {
+                local_ray.direction_reciprocal = 1.0f / local_ray.direction;
+                if (geo.type != GeometryType_Quad) local_ray.prePrepRay();
+            }
 
             switch (geo.type) {
-                case GeometryType_Quad       : current_found = local_ray.hitsDefaultQuad(geo.flags, local_hit); break;
-                case GeometryType_Box        : current_found = local_ray.hitsDefaultBox(geo.flags, local_hit); break;
-                case GeometryType_Sphere     : current_found = local_ray.hitsDefaultSphere(geo.flags, local_hit); break;
-                case GeometryType_Tetrahedron: current_found = local_ray.hitsDefaultTetrahedron(geo.flags, local_hit); break;
+                case GeometryType_Quad       : current_found = local_ray.hitsDefaultQuad(local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT); break;
+                case GeometryType_Box        : current_found = local_ray.hitsDefaultBox(local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT); break;
+                case GeometryType_Sphere     : current_found = local_ray.hitsDefaultSphere(local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT); break;
+                case GeometryType_Tetrahedron: current_found = local_ray.hitsDefaultTetrahedron(local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT); break;
                 case GeometryType_Mesh       :
-                    local_ray.prePrepRay();
                     local_hit.distance = local_hit.distance == INFINITY ? INFINITY : geo.transform.internPos(hit.position - local_ray.origin).length();
                     current_found = mesh_tracer.trace(scene.meshes[geo.id], local_ray, local_hit, any_hit);
                     break;
@@ -160,14 +164,12 @@ struct SceneTracer {
                 local_hit.position = geo.transform.externPos(local_hit.position);
                 local_hit.distance_squared = (local_hit.position - ray.origin).squaredLength();
                 if (local_hit.distance_squared < hit.distance_squared) {
-                    hit = local_hit;
-                    hit.geo_type = geo.type;
-                    hit.material_id = geo.material_id;
-                    hit_geometry_index = geometry_index;
-                    found = true;
-
                     if (any_hit)
-                        break;
+                        return true;
+
+                    hit_geometry_index = geometry_index;
+                    hit = local_hit;
+                    found = true;
                 }
             }
         }
@@ -208,7 +210,9 @@ struct SceneTracer {
 //            hit.area *= (1.0f - hit.normal).dot(xform.rotation * xform.scale);
 //            hit.cone_width = hit.distance * one_over_focal_length_squared;
             hit.distance = sqrtf(hit.distance_squared);
-            hit.geo_id = hit_geometry.id;
+            hit.geo_id = hit_geometry_index;
+            hit.material_id = hit_geometry.material_id;
+            hit.geo_type = hit_geometry.type;
         }
 
         return found;

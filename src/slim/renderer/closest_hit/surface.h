@@ -20,7 +20,7 @@ INLINE bool shadeFromEmissiveQuads(Shaded &shaded, Ray &ray, SceneTracer &scene_
             continue;
 
         quad.transform.internPosAndDir(shaded.viewing_origin, shaded.viewing_direction, Ro, Rd);
-        if (local_ray.hitsDefaultQuad(quad.flags, shaded)) {
+        if (local_ray.hitsDefaultQuad(shaded, quad.flags & GEOMETRY_IS_TRANSPARENT)) {
             shaded.position = quad.transform.externPos(shaded.position);
             shaded.distance_squared = (shaded.position - shaded.viewing_origin).squaredLength();
             if (local_hit.distance_squared < shaded.distance_squared) {
@@ -64,10 +64,10 @@ INLINE bool shadeFromEmissiveQuads(Shaded &shaded, Ray &ray, SceneTracer &scene_
 
                 f32 d = 1;
                 if (shadowing_primitive.type == GeometryType_Sphere) {
-                    if (scene_tracer.local_ray.hitsDefaultSphere(shadowing_primitive.flags, local_hit))
+                    if (scene_tracer.local_ray.hitsDefaultSphere(local_hit, shadowing_primitive.flags & GEOMETRY_IS_TRANSPARENT))
                         d -= (1.0f - sqrtf(local_hit.distance_squared)) / (local_hit.distance * emission_intensity * 3);
                 } else if (shadowing_primitive.type == GeometryType_Quad) {
-                    if (local_ray.hitsDefaultQuad(shadowing_primitive.flags, local_hit)) {
+                    if (local_ray.hitsDefaultQuad(local_hit, shadowing_primitive.flags & GEOMETRY_IS_TRANSPARENT)) {
                         local_hit.position.y = 0;
                         local_hit.position.x = local_hit.position.x < 0 ? -local_hit.position.x : local_hit.position.x;
                         local_hit.position.z = local_hit.position.z < 0 ? -local_hit.position.z : local_hit.position.z;
@@ -109,7 +109,7 @@ Color shadeSurface(Ray &ray, SceneTracer &scene_tracer, LightsShader &lights_sha
             for (u32 i = 0; i < scene_tracer.scene.counts.lights; i++) {
                 const Light &light = scene_tracer.scene.lights[i];
                 if (shaded.isFacing(light) &&
-                    !scene_tracer.inShadow(shaded.position, shaded.light_direction))
+                    !scene_tracer.inShadow(shaded.position, shaded.light_direction, shaded.light_distance, shaded.light_distance_squared))
                     color = ((light.intensity / shaded.light_distance_squared) * light.color).mulAdd(shaded.radianceFraction(), color);
             }
         }

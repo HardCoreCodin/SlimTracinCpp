@@ -110,7 +110,7 @@ struct Geometry {
     enum ColorID color{White};
     u32 id = 0;
     u32 material_id = 0;
-    u8 flags = 0;
+    u8 flags = GEOMETRY_IS_SHADOWING;
     RectI screen_bounds;
 
     INLINE_XPU AABB getAABB() const {

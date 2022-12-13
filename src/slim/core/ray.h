@@ -33,9 +33,7 @@ struct Ray {
     INLINE_XPU void prePrepRay() {
         faces = direction.facing();
         octant_shifts = faces;
-        scaled_origin.x = -origin.x * direction_reciprocal.x;
-        scaled_origin.y = -origin.y * direction_reciprocal.y;
-        scaled_origin.z = -origin.z * direction_reciprocal.z;
+        scaled_origin = -origin * direction_reciprocal;
     }
 
     INLINE_XPU bool hitsAABB(const AABB &aabb, f32 closest_distance, f32 &distance) {
@@ -79,7 +77,7 @@ struct Ray {
         return true;
     }
 
-    INLINE_XPU bool hitsDefaultQuad(u8 flags, RayHit &hit) {
+    INLINE_XPU bool hitsDefaultQuad(RayHit &hit, bool is_transparent = false) {
         if (direction.y == 0) // The ray is parallel to the plane
             return false;
 
@@ -104,7 +102,7 @@ struct Ray {
         hit.uv.y = hit.position.z;
         hit.uv.shiftToNormalized();
 
-        if (flags & MATERIAL_HAS_TRANSPARENT_UV && hit.uv.onCheckerboard())
+        if (is_transparent && hit.uv.onCheckerboard())
             return false;
 
         hit.normal = {0, 1, 0};
@@ -115,39 +113,38 @@ struct Ray {
         return true;
     }
 
-    INLINE_XPU BoxSide hitsDefaultBox(u8 flags, RayHit &hit) {
+    INLINE_XPU BoxSide hitsDefaultBox(RayHit &hit, bool is_transparent = false) {
         vec3 signed_rcp{faces};
         signed_rcp *= direction_reciprocal;
         vec3 Near{scaled_origin - signed_rcp};
         vec3 Far{scaled_origin + signed_rcp};
 
-        Axis far_hit_axis;
-        f32 far_hit_t = Far.minimum(&far_hit_axis);
+        BoxSide near_side, far_side, side;
+        f32 far_hit_t = Far.minimum(&far_side);
         if (far_hit_t < 0) // Further-away hit is behind the ray - tracers can not occur.
             return BoxSide_None;
 
-        Axis near_hit_axis;
-        f32 near_hit_t = Near.maximum(&near_hit_axis);
+        f32 near_hit_t = Near.maximum(&near_side);
         if (far_hit_t < (near_hit_t > 0 ? near_hit_t : 0))
             return BoxSide_None;
 
-        Sides sides{faces};
         hit.distance = near_hit_t;
         hit.from_behind = near_hit_t < 0; // Near hit is behind the ray, far hit is in front of it: hit is from behind
         if (hit.from_behind) {
             hit.distance = far_hit_t;
-            sides.flip();
-        }
+            side = far_side;
+        } else
+            side = near_side;
 
-        BoxSide side{(BoxSide)sides.mask};
         hit.position = at(hit.distance);
         hit.uv.setByBoxSide(side, hit.position.x, hit.position.y, hit.position.z);
 
-        if (flags & MATERIAL_HAS_TRANSPARENT_UV && hit.uv.onCheckerboard()) {
-            if (hit.from_behind) return BoxSide_None;
+        if (is_transparent && hit.uv.onCheckerboard()) {
+            if (hit.from_behind)
+                return BoxSide_None;
+
             hit.from_behind = true;
-            sides.flip();
-            side = (BoxSide)sides.mask;
+            side = far_side;
             hit.distance = far_hit_t;
             hit.position = at(far_hit_t);
             hit.uv.setByBoxSide(side, hit.position.x, hit.position.y, hit.position.z);
@@ -156,8 +153,9 @@ struct Ray {
 
         }
 
-        hit.normal = sides;
-        hit.normal.shiftToNormalized();
+        hit.normal.x = side == BoxSide_Right ? 1.0f : 0.0f;
+        hit.normal.y = side == BoxSide_Top ? 1.0f : 0.0f;
+        hit.normal.z = side == BoxSide_Front ? 1.0f : 0.0f;
         hit.NdotV = -hit.normal.dot(direction);
         hit.distance_squared = hit.distance * hit.distance;
         hit.uv_coverage_over_surface_area = 0.25f;
@@ -165,7 +163,7 @@ struct Ray {
         return side;
     }
 
-    INLINE_XPU bool hitsDefaultSphere(u8 flags, RayHit &hit) {
+    INLINE_XPU bool hitsDefaultSphere(RayHit &hit, bool is_transparent = false) {
         f32 t_to_closest = -origin.dot(direction);
         if (t_to_closest <= 0)// Ray is aiming away from the sphere
             return false;
@@ -184,16 +182,20 @@ struct Ray {
         bool has_outer_hit = hit.distance > 0;
         if (has_outer_hit) {
             hit.position = at(hit.distance);
-            hit.uv.setBySphere(hit.position.x, hit.position.y, hit.position.z);
-            if (flags & MATERIAL_HAS_TRANSPARENT_UV && hit.uv.onCheckerboard())
-                has_outer_hit = false;
+            if (is_transparent) {
+                hit.uv.setBySphere(hit.position.x, hit.position.y, hit.position.z);
+                if (!hit.uv.onCheckerboard())
+                    has_outer_hit = false;
+            }
         }
         if (!has_outer_hit) {
             hit.distance = t_to_closest + delta;
             hit.position = at(hit.distance);
-            hit.uv.setBySphere(hit.position.x, hit.position.y, hit.position.z);
-            if (flags & MATERIAL_HAS_TRANSPARENT_UV && hit.uv.onCheckerboard())
-                has_outer_hit = false;
+            if (is_transparent) {
+                hit.uv.setBySphere(hit.position.x, hit.position.y, hit.position.z);
+                if (!hit.uv.onCheckerboard())
+                    return false;
+            }
         }
 
         hit.from_behind = !has_outer_hit;
@@ -204,7 +206,7 @@ struct Ray {
         return true;
     }
 
-    INLINE_XPU bool hitsDefaultTetrahedron(u8 flags, RayHit &hit) {
+    INLINE_XPU bool hitsDefaultTetrahedron(RayHit &hit, bool is_transparent = false) {
         mat3 tangent_matrix;
         vec3 tangent_pos;
         vec3 face_normal;
@@ -290,7 +292,7 @@ struct Ray {
             hit.uv.x = tangent_pos.x;
             hit.uv.y = tangent_pos.y;
 
-            if ((flags & MATERIAL_HAS_TRANSPARENT_UV) && hit.uv.onCheckerboard())
+            if (is_transparent && hit.uv.onCheckerboard())
                 continue;
 
             if (hit.distance < closest_distance) {

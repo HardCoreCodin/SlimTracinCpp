@@ -16,26 +16,26 @@
 #include "./raytracer_kernel.h"
 #endif
 
-//#include "../draw/rectangle.h"
-//void drawSSB(Scene *scene, Canvas &canvas) {
-//    ColorID color;
-//    Geometry *geometry = scene.geometries;
-//    for (u32 i = 0; i < scene.counts.geometries; i++, geometry++) {
-//        if (geometry.flags & GEOMETRY_IS_VISIBLE) {
-//            switch (geometry.type) {
-//                case GeometryType_Box        : color = Cyan;    break;
-//                case GeometryType_Quad       : color = White;   break;
-//                case GeometryType_Sphere     : color = Yellow;  break;
-//                case GeometryType_Tetrahedron: color = Magenta; break;
-//                case GeometryType_Mesh       : color = Red;     break;
-//                default:
-//                    continue;
-//            }
-//            canvas.drawRect(geometry.screen_bounds, color);
-//        }
-//    }
-//}
-//
+#include "../draw/rectangle.h"
+void drawSSB(const Scene &scene, Canvas &canvas) {
+    ColorID color;
+    for (u32 i = 0; i < scene.counts.geometries; i++) {
+        Geometry &geometry = scene.geometries[i];
+        if (geometry.flags & GEOMETRY_IS_VISIBLE) {
+            switch (geometry.type) {
+                case GeometryType_Box        : color = Cyan;    break;
+                case GeometryType_Quad       : color = White;   break;
+                case GeometryType_Sphere     : color = Yellow;  break;
+                case GeometryType_Tetrahedron: color = Magenta; break;
+                case GeometryType_Mesh       : color = Red;     break;
+                default:
+                    continue;
+            }
+            canvas.drawRect(geometry.screen_bounds, color);
+        }
+    }
+}
+
 //void setBoxGeometryFromAABB(Geometry *box_geometry, AABB *aabb) {
 //    box_geometry.transform.rotation = {};
 //    box_geometry.transform.position = (aabb.max + aabb.min) * 0.5f;
@@ -63,19 +63,18 @@
 //    }
 //}
 //
-//void drawBVH(Scene *scene, Viewport *viewport) {
+//void drawBVH(const Scene &scene, const Viewport &viewport) {
 //    static Geometry box_geometry;
-//    BVHNode *node = scene.bvh.nodes;
-//    Geometry *geometry;
 //    box_geometry.transform.rotation = {};
 //    enum ColorID color;
 //    u32 *geometry_id;
 //
 //    for (u8 node_id = 0; node_id < scene.bvh.node_count; node_id++, node++) {
-//        if (node.child_count) {
-//            geometry_id = scene.bvh.leaf_ids + node.first_child_id;
-//            for (u32 i = 0; i < node.child_count; i++, geometry_id++) {
-//                geometry = &scene.geometries[*geometry_id];
+//        BVHNode &node = scene.bvh.nodes[node_id];
+//        if (node.leaf_count) {
+//            geometry_id = scene.bvh_leaf_geometry_indices + node.first_index;
+//            for (u32 i = 0; i < node.leaf_count; i++, geometry_id++) {
+//                Geometry &geometry = scene.geometries[geometry_id];
 //                switch (geometry.type) {
 //                    case GeometryType_Box        : color = Cyan;    break;
 //                    case GeometryType_Quad       : color = White;   break;
@@ -174,7 +173,6 @@ struct RayTracer {
             for (u16 x = 0; x < canvas.dimensions.width; x++, pixel++) {
                 ray.origin = camera.position;
                 ray.direction = current.normalized();
-                ray.direction_reciprocal = 1.0f / ray.direction;
 
                 renderPixel(ray, camera.position, inverted_camera_rotation, x, y, color);
 
