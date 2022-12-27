@@ -34,9 +34,8 @@ struct MeshTracer {
                 hit = triangle_hit;
                 hit.uv.x = UV.x;
                 hit.uv.y = UV.y;
-                hit.geo_id = i;
+                hit.id = i;
                 hit.uv_coverage_over_surface_area = triangle->area_of_uv / triangle->area_of_parallelogram;
-                hit.NdotV = -hit.normal.dot(ray.direction);
 
                 found_triangle = true;
 
@@ -52,7 +51,7 @@ struct MeshTracer {
         bool hit_left, hit_right, found = false;
         f32 left_distance, right_distance;
 
-        if (!ray.hitsAABB(mesh.bvh.nodes->aabb, hit.distance, left_distance))
+        if (!(ray.hitsAABB(mesh.bvh.nodes->aabb, left_distance) && left_distance < hit.distance))
             return false;
 
         if (unlikely(mesh.bvh.nodes->leaf_count))
@@ -65,13 +64,13 @@ struct MeshTracer {
         while (true) {
             right_node = left_node + 1;
 
-            hit_left  = ray.hitsAABB(left_node->aabb,  hit.distance, left_distance);
-            hit_right = ray.hitsAABB(right_node->aabb, hit.distance, right_distance);
+            hit_left  = ray.hitsAABB(left_node->aabb, left_distance) && left_distance < hit.distance;
+            hit_right = ray.hitsAABB(right_node->aabb, right_distance) && right_distance < hit.distance;
 
             if (hit_left) {
                 if (unlikely(left_node->leaf_count)) {
                     if (hitTriangles(mesh.triangles + left_node->first_index, left_node->leaf_count, ray, hit, any_hit)) {
-                        hit.geo_id += left_node->first_index;
+                        hit.id += left_node->first_index;
                         found = true;
                         if (any_hit)
                             break;
@@ -85,7 +84,7 @@ struct MeshTracer {
             if (hit_right) {
                 if (unlikely(right_node->leaf_count)) {
                     if (hitTriangles(mesh.triangles + right_node->first_index, right_node->leaf_count, ray, hit, any_hit)) {
-                        hit.geo_id += right_node->first_index;
+                        hit.id += right_node->first_index;
                         found = true;
                         if (any_hit)
                             break;

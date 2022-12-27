@@ -9,7 +9,7 @@
 // Or using the single-header file:
 //#include "../slim.h"
 
-struct LightsApp : SlimApp {
+struct GeometryApp : SlimApp {
     // Viewport:
     Camera camera{
             {0, 7, -11},
@@ -40,7 +40,7 @@ struct LightsApp : SlimApp {
     Light rim_light{ {2, 5, 12}, {1.0f, 0.25f, 0.25f}, 0.9f * 40.0f};
     Light *lights{&key_light};
 
-    Material shapes_material{BRDF_Lambert, 0.5f, 0.0f};
+    Material shapes_material{BRDF_CookTorrance, 0.8f, 0.0f, 0, 0, 0.7f, 0.1f};
     Material floor_material{BRDF_CookTorrance, 0.5f, 0.0f, MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
     Material *materials{&shapes_material};
 
@@ -55,9 +55,9 @@ struct LightsApp : SlimApp {
     Texture *textures = &floor_albedo_map;
 
     Geometry floor{{{}, {}, {40, 1, 40}}, GeometryType_Quad};
-    Geometry box{{{-9, 4, 3}, {0.02f, 0.04f, 0.0f}, {2.5f}}, GeometryType_Box};
-    Geometry tet{{{-3, 4, 12}, {0.02f, 0.04f, 0.06f}, {2.5f}}, GeometryType_Tetrahedron};
-    Geometry sphere{{{3, 4, 0}, {}, {2.5f}}, GeometryType_Sphere};
+    Geometry box{{{-9, 4, 3}, {0.02f, 0.04f, 0.0f}, {3,4,5}}, GeometryType_Box};
+    Geometry tet{{{-3, 4, 12}, {0.02f, 0.04f, 0.06f}, {3,4,5}}, GeometryType_Tetrahedron};
+    Geometry sphere{{{3, 4, 0}, {}, {3,4,5}}, GeometryType_Sphere};
     Geometry *geometries{&floor};
 
     SceneCounts counts{4, 1, 3, 2, 2};
@@ -70,7 +70,7 @@ struct LightsApp : SlimApp {
     f32 opacity = 0.2f;
     quat rotation{tet.transform.rotation};
 
-    LightsApp() {
+    GeometryApp() {
         floor.material_id = &floor_material - materials;
         floor_material.texture_count = 2;
         floor_material.texture_ids[0] = 0;
@@ -100,13 +100,14 @@ struct LightsApp : SlimApp {
         if (!mouse::is_captured) selection.manipulate(viewport, scene);
         if (!controls::is_pressed::alt) viewport.updateNavigation(delta_time);
 
-        quat rot = quat{rotation.axis, rotation.amount / delta_time};
+        quat rot = quat{rotation.axis, rotation.amount};
         for (u8 i = &box - geometries; i < 4; i++) {
             Geometry &geo = geometries[i];
 
             if (!(controls::is_pressed::alt && &geo == selection.geometry))
                 geo.transform.rotation = (geo.transform.rotation * rot).normalized();
         }
+        scene.updateAABBs();
         scene.updateBVH();
 
 //        uploadPrimitives(scene);
@@ -158,5 +159,5 @@ struct LightsApp : SlimApp {
 };
 
 SlimApp* createApp() {
-    return (SlimApp*)new LightsApp();
+    return (SlimApp*)new GeometryApp();
 }

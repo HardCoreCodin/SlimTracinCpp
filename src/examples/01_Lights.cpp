@@ -15,16 +15,11 @@ struct LightsApp : SlimApp {
     }, *cameras{&camera};
     Canvas canvas;
     Viewport viewport{canvas,&camera};
-    bool antialias = false;
 
     // HUD:
-    HUDLine AA{(char*)"AA : ",
-               (char*)"On",
-               (char*)"Off",
-               &antialias,
-               true};
+    HUDLine FPS_hud_line{(char*)"FPS : "};
     HUDSettings hud_settings{1};
-    HUD hud{hud_settings, &AA};
+    HUD hud{hud_settings, &FPS_hud_line};
 
     // Scene:
     Light key_light{ {10, 10, -5}, {1.0f, 1.0f, 0.65f}, 3.3f * 40.0f};
@@ -78,6 +73,7 @@ struct LightsApp : SlimApp {
     }
 
     void OnUpdate(f32 delta_time) override {
+        FPS_hud_line.value = (i32)render_timer.average_frames_per_second;
         if (!mouse::is_captured) selection.manipulate(viewport, scene);
         if (!controls::is_pressed::alt) viewport.updateNavigation(delta_time);
     }
@@ -93,22 +89,18 @@ struct LightsApp : SlimApp {
         if (key == 'S') move.backward = is_pressed;
         if (key == 'A') move.left     = is_pressed;
         if (key == 'D') move.right    = is_pressed;
-        if (!is_pressed) {
-            if (key == controls::key_map::tab)
-                hud.enabled = !hud.enabled;
-            else if (key == 'Q') {
-                canvas.antialias = canvas.antialias == NoAA ? SSAA : NoAA;
-                antialias = canvas.antialias == SSAA;
-            }
-        }
+        if (key == controls::key_map::tab && !is_pressed) hud.enabled = !hud.enabled;
     }
+
     void OnWindowResize(u16 width, u16 height) override {
         viewport.updateDimensions(width, height);
         canvas.dimensions.update(width, height);
     }
+
     void OnMouseButtonDown(mouse::Button &mouse_button) override {
         mouse::pos_raw_diff_x = mouse::pos_raw_diff_y = 0;
     }
+
     void OnMouseButtonDoubleClicked(mouse::Button &mouse_button) override {
         if (&mouse_button == &mouse::left_button) {
             mouse::is_captured = !mouse::is_captured;

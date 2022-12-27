@@ -17,14 +17,14 @@ struct Transform : OrientationUsingQuaternion {
 
     INLINE_XPU void externPosAndDir(const vec3 &pos, const vec3 &dir, vec3 &out_pos, vec3 &out_dir) const {
         out_pos = position + (rotation * (scale * position));
-        out_dir = (rotation * (scale * dir)).normalized();
+        out_dir = rotation * (scale * dir);
     }
 
     INLINE_XPU void internPosAndDir(const vec3 &pos, const vec3 &dir, vec3 &out_pos, vec3 &out_dir) const {
         vec3 inv_scale = 1.0f / scale;
         quat inv_rotation = rotation.conjugate();
         out_pos = inv_scale * (inv_rotation * (pos - position));
-        out_dir = (inv_scale * (inv_rotation * dir)).normalized();
+        out_dir = inv_scale * (inv_rotation * dir);
     }
 
     INLINE_XPU vec3 externPos(const vec3 &pos) const { return _translate(_rotate(_scale(pos))); }
@@ -34,63 +34,35 @@ struct Transform : OrientationUsingQuaternion {
     INLINE_XPU vec3 internDir(const vec3 &dir) const { return _unscale(_unrotate(dir)).normalized(); }
 
     INLINE_XPU AABB internAABB(const AABB &aabb) const {
-        const vec3 vertices[8] = {
-                {aabb.min.x, aabb.min.y, aabb.min.z},
-                {aabb.min.x, aabb.min.y, aabb.max.z},
-                {aabb.min.x, aabb.max.y, aabb.min.z},
-                {aabb.min.x, aabb.max.y, aabb.max.z},
-                {aabb.max.x, aabb.min.y, aabb.min.z},
-                {aabb.max.x, aabb.min.y, aabb.max.z},
-                {aabb.max.x, aabb.max.y, aabb.min.z},
-                {aabb.max.x, aabb.max.y, aabb.max.z}
-        };
+        vec3 pos, min{+INFINITY}, max{-INFINITY};
 
-        vec3 min{+INFINITY};
-        vec3 max{-INFINITY};
-
-        vec3 pos;
-        for (const auto &vertex : vertices) {
-            pos = internPos(vertex);
-
-            if (pos.x < min.x) min.x = pos.x;
-            if (pos.y < min.y) min.y = pos.y;
-            if (pos.z < min.z) min.z = pos.z;
-
-            if (pos.x > max.x) max.x = pos.x;
-            if (pos.y > max.y) max.y = pos.y;
-            if (pos.z > max.z) max.z = pos.z;
-        }
+        for (u8 i = 0; i < 2; i++)
+            for (u8 j = 0; j < 2; j++)
+                for (u8 k = 0; k < 2; k++) {
+                    pos.x = (&aabb.min + i)->x;
+                    pos.y = (&aabb.min + j)->y;
+                    pos.z = (&aabb.min + k)->z;
+                    pos = internPos(pos);
+                    min = minimum(min, pos);
+                    max = maximum(max, pos);
+                }
 
         return {min, max};
     }
 
     INLINE_XPU AABB externAABB(const AABB &aabb) const {
-        const vec3 vertices[8] = {
-                {aabb.min.x, aabb.min.y, aabb.min.z},
-                {aabb.min.x, aabb.min.y, aabb.max.z},
-                {aabb.min.x, aabb.max.y, aabb.min.z},
-                {aabb.min.x, aabb.max.y, aabb.max.z},
-                {aabb.max.x, aabb.min.y, aabb.min.z},
-                {aabb.max.x, aabb.min.y, aabb.max.z},
-                {aabb.max.x, aabb.max.y, aabb.min.z},
-                {aabb.max.x, aabb.max.y, aabb.max.z}
-        };
+        vec3 pos, min{+INFINITY}, max{-INFINITY};
 
-        vec3 min{+INFINITY};
-        vec3 max{-INFINITY};
-
-        vec3 pos;
-        for (const auto &vertex : vertices) {
-            pos = externPos(vertex);
-
-            if (pos.x < min.x) min.x = pos.x;
-            if (pos.y < min.y) min.y = pos.y;
-            if (pos.z < min.z) min.z = pos.z;
-
-            if (pos.x > max.x) max.x = pos.x;
-            if (pos.y > max.y) max.y = pos.y;
-            if (pos.z > max.z) max.z = pos.z;
-        }
+        for (u8 i = 0; i < 2; i++)
+            for (u8 j = 0; j < 2; j++)
+                for (u8 k = 0; k < 2; k++) {
+                    pos.x = (&aabb.min + i)->x;
+                    pos.y = (&aabb.min + j)->y;
+                    pos.z = (&aabb.min + k)->z;
+                    pos = externPos(pos);
+                    min = minimum(min, pos);
+                    max = maximum(max, pos);
+                }
 
         return {min, max};
     }
@@ -110,11 +82,5 @@ struct Geometry {
     enum ColorID color{White};
     u32 id = 0;
     u32 material_id = 0;
-    u8 flags = GEOMETRY_IS_SHADOWING;
-    RectI screen_bounds;
-
-    INLINE_XPU AABB getAABB() const {
-        f32 size = type == GeometryType_Tetrahedron ? (SQRT3 / 3.0f) : 1.0f;
-        return {-size, size};
-    }
+    u8 flags = GEOMETRY_IS_VISIBLE | GEOMETRY_IS_SHADOWING;
 };

@@ -22,11 +22,12 @@ INLINE bool shadeFromEmissiveQuads(Shaded &shaded, Ray &ray, SceneTracer &scene_
         quad.transform.internPosAndDir(shaded.viewing_origin, shaded.viewing_direction, Ro, Rd);
         if (local_ray.hitsDefaultQuad(shaded, quad.flags & GEOMETRY_IS_TRANSPARENT)) {
             shaded.position = quad.transform.externPos(shaded.position);
-            shaded.distance_squared = (shaded.position - shaded.viewing_origin).squaredLength();
-            if (local_hit.distance_squared < shaded.distance_squared) {
-                local_hit.geo_id = i;
-                local_hit.geo_type = GeometryType_Quad;
-                local_hit.material_id = quad.material_id;
+            f32 t2 = (shaded.position - shaded.viewing_origin).squaredLength();
+            if (t2 < shaded.distance*shaded.distance) {
+                local_hit.distance = sqrtf(t2);
+                local_hit.id = i;
+//                local_hit.geo_type = GeometryType_Quad;
+//                local_hit.material_id = quad.material_id;
                 *((RayHit*)&shaded) = local_hit;
                 found = true;
             }
@@ -65,7 +66,7 @@ INLINE bool shadeFromEmissiveQuads(Shaded &shaded, Ray &ray, SceneTracer &scene_
                 f32 d = 1;
                 if (shadowing_primitive.type == GeometryType_Sphere) {
                     if (scene_tracer.local_ray.hitsDefaultSphere(local_hit, shadowing_primitive.flags & GEOMETRY_IS_TRANSPARENT))
-                        d -= (1.0f - sqrtf(local_hit.distance_squared)) / (local_hit.distance * emission_intensity * 3);
+                        d -= (1.0f - local_hit.distance) / (local_hit.distance * emission_intensity * 3);
                 } else if (shadowing_primitive.type == GeometryType_Quad) {
                     if (local_ray.hitsDefaultQuad(local_hit, shadowing_primitive.flags & GEOMETRY_IS_TRANSPARENT)) {
                         local_hit.position.y = 0;
@@ -88,9 +89,6 @@ INLINE bool shadeFromEmissiveQuads(Shaded &shaded, Ray &ray, SceneTracer &scene_
         }
     }
 
-    if (found)
-        shaded.distance = sqrtf(shaded.distance_squared);
-
     return found;
 }
 
@@ -109,7 +107,7 @@ Color shadeSurface(Ray &ray, SceneTracer &scene_tracer, LightsShader &lights_sha
             for (u32 i = 0; i < scene_tracer.scene.counts.lights; i++) {
                 const Light &light = scene_tracer.scene.lights[i];
                 if (shaded.isFacing(light) &&
-                    !scene_tracer.inShadow(shaded.position, shaded.light_direction, shaded.light_distance, shaded.light_distance_squared))
+                    !scene_tracer.inShadow(shaded.position, shaded.light_direction, shaded.light_distance))
                     color = ((light.intensity / shaded.light_distance_squared) * light.color).mulAdd(shaded.radianceFraction(), color);
             }
         }
@@ -133,7 +131,7 @@ Color shadeSurface(Ray &ray, SceneTracer &scene_tracer, LightsShader &lights_sha
             if (scene_tracer.trace(ray, shaded)) {
                 shaded.reset(ray, scene.geometries, scene.materials, scene.textures, scene_tracer.pixel_area_over_focal_length_squared);
 
-                if (shaded.geo_type == GeometryType_Quad && shaded.material->isEmissive()) {
+                if (shaded.geometry->type == GeometryType_Quad && shaded.material->isEmissive()) {
                     color = shaded.from_behind ? Black : shaded.material->emission;
                     break;
                 }

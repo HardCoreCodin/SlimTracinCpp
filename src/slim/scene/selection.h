@@ -15,9 +15,9 @@ struct Selection {
          world_offset,
          *world_position{nullptr};
     Geometry *geometry{nullptr};
+    Light *light{nullptr};
     f32 object_distance = 0;
-    u32 geo_id = 0;
-    GeometryType geo_type = GeometryType_None;
+
     BoxSide box_side = BoxSide_None;
     bool changed = false;
     bool left_mouse_button_was_pressed = false;
@@ -34,42 +34,40 @@ struct Selection {
 
         ray.origin = camera.position;
         ray.direction = camera.getRayDirectionAt(x, y, dimensions.width_over_height, normalization_factor);
-        hit.distance_squared = INFINITY;
+        hit.distance = local_ray_hit.distance = INFINITY;
+        Geometry *hit_geo = nullptr;
+        Light *hit_light = nullptr;
 
-        if (mouse::left_button.is_pressed && !left_mouse_button_was_pressed) {
+        if (mouse::left_button.is_pressed && !left_mouse_button_was_pressed && !controls::is_pressed::alt) {
             // This is the first frame after the left mouse button went down:
             // Cast a ray onto the scene to find the closest object behind the hovered pixel:
-            if (scene.castRay(ray, hit)) {
-                // Detect if object scene->selection has changed:
-                changed = (
-                    geo_type != hit.geo_type ||
-                    geo_id != hit.geo_id
-                );
-
-                // Track the object that is now selected:
-                geo_type = hit.geo_type;
-                geo_id   = hit.geo_id;
-
-                // Capture a pointer to the selected object's position for later use in transformations:
-                if (geo_type == GeometryType_Light) {
+            if (scene.castRay(ray, hit, &hit_geo, &hit_light)) {
+                // Track the object that is now selected and Detect if object scene->selection has changed:
+                if (hit_light) {
+                    changed = light != hit_light;
+                    light = hit_light;
+                    world_position = &hit_light->position_or_direction;
                     geometry = nullptr;
-                    world_position = &scene.lights[geo_id].position_or_direction;
                 } else {
-                    geometry = scene.geometries + geo_id;
+                    changed = geometry != hit_geo;
+                    geometry = hit_geo;
                     world_position = &geometry->transform.position;
                 }
+
+                // Capture a pointer to the selected object's position for later use in transformations:
                 transformation_plane_origin = hit.position;
                 world_offset = hit.position - *world_position;
 
                 // Track how far away the hit position is from the camera along the depth axis:
                 object_distance = (camera.rotation.transposed() * (hit.position - ray.origin)).z;
             } else {
-                if (geo_type) changed = true;
-                geo_type = GeometryType_None;
+                if (geometry || light) changed = true;
+                geometry = nullptr;
+                light = nullptr;
             }
         }
         left_mouse_button_was_pressed = mouse::left_button.is_pressed;
-        if (geo_type) {
+        if (geometry || light) {
             if (controls::is_pressed::alt) {
                 bool any_mouse_button_is_pressed = (
                         mouse::left_button.is_pressed ||
@@ -82,8 +80,8 @@ struct Selection {
                         if (geometry->type == GeometryType_Mesh)
                             xform.scale *= scene.meshes[geometry->id].aabb.max;
                     } else {
-                        xform.position = scene.lights[geo_id].position_or_direction;
-                        xform.scale = scene.lights[geo_id].intensity / 64;
+                        xform.position = light->position_or_direction;
+                        xform.scale = light->intensity / 64;
                         xform.rotation = {};
                     }
 
@@ -111,8 +109,8 @@ struct Selection {
                             if (geometry->type == GeometryType_Mesh)
                                 xform.scale *= scene.meshes[geometry->id].aabb.max;
                         } else {
-                            xform.position = scene.lights[geo_id].position_or_direction;
-                            xform.scale = scene.lights[geo_id].intensity / 64;
+                            xform.position = light->position_or_direction;
+                            xform.scale = light->intensity / 64;
                             xform.rotation = {};
                         }
 
@@ -128,7 +126,7 @@ struct Selection {
                                     hit.position.x = hit.position.z > 0 ? hit.position.z : -hit.position.z;
                                 else
                                     hit.position.x = hit.position.y > 0 ? hit.position.y : -hit.position.y;
-                                scene.lights[geo_id].intensity = (object_scale.x * 64) * hit.position.x;
+                                light->intensity = (object_scale.x * 64) * hit.position.x;
                             }
                         } else if (mouse::right_button.is_pressed && geometry) {
                             vec3 v1{ hit.position - transformation_plane_center };

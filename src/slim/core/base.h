@@ -109,6 +109,9 @@ typedef signed   long int  i32;
 typedef float  f32;
 typedef double f64;
 
+#define Max(a, b) ((a) > (b) ? (a) : (b))
+#define Min(a, b) ((a) < (b) ? (a) : (b))
+
 #ifndef CANVAS_COUNT
 #define CANVAS_COUNT 2
 #endif
@@ -437,6 +440,7 @@ struct Sides {
 
 enum RenderMode {
     RenderMode_Normals,
+    RenderMode_NormalMap,
     RenderMode_Beauty,
     RenderMode_Depth,
     RenderMode_MipLevel,
@@ -469,9 +473,9 @@ struct OctantShifts {
 
     INLINE_XPU BoxSide getBoxSide(Axis axis) const {
         return (BoxSide)(
-                (axis == Axis_X) << x |
-                (axis == Axis_Y) << y |
-                (axis == Axis_Z) << z
+            (axis == Axis_X) * (Axis_X << x) |
+            (axis == Axis_Y) * (Axis_Y << y) |
+            (axis == Axis_Z) * (Axis_Z << z)
         );
     }
 };

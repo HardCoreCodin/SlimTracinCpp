@@ -259,38 +259,34 @@ struct vec3 {
         };
     }
 
-    INLINE_XPU f32 minimum(BoxSide *side = nullptr) const {
-        if (side) {
-            f32 result = x;
-            *side = signbit(x) ? BoxSide_Left : BoxSide_Right;
-            if (y < result) {
-                result = y;
-                *side = signbit(y) ? BoxSide_Bottom : BoxSide_Top;
-            }
-            if (z < result) {
-                result = z;
-                *side = signbit(z) ? BoxSide_Back : BoxSide_Front;
-            }
-            return result;
-        } else
-            return x < y ? (x < z ? x : z) : (y < z ? y : z);
+    INLINE_XPU f32 minimum() const { return Min(x, Min(y, z)); }
+    INLINE_XPU f32 minimum(Axis &axis) const {
+        f32 result = x;
+        axis = Axis_X;
+        if (y < result) {
+            result = y;
+            axis = Axis_Y;
+        }
+        if (z < result) {
+            result = z;
+            axis = Axis_Z;
+        }
+        return result;
     }
 
-    INLINE_XPU f32 maximum(BoxSide *side = nullptr) const {
-        if (side) {
+    INLINE_XPU f32 maximum() const { return Max(x, Max(y, z)); }
+    INLINE_XPU f32 maximum(Axis &axis) const {
             f32 result = x;
-            *side = signbit(x) ? BoxSide_Left : BoxSide_Right;
+            axis = Axis_X;
             if (y > result) {
                 result = y;
-                *side = signbit(y) ? BoxSide_Bottom : BoxSide_Top;
+                axis = Axis_Y;
             }
             if (z > result) {
                 result = z;
-                *side = signbit(z) ? BoxSide_Back : BoxSide_Front;
+                axis = Axis_Z;
             }
             return result;
-        } else
-            return x > y ? (x > z ? x : z) : (y > z ? y : z);
     }
 
     INLINE_XPU f32 dot(const vec3 &rhs) const {

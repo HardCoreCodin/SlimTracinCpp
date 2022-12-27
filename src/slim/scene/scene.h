@@ -42,6 +42,23 @@ struct Scene {
     Texture *textures{nullptr};
     Material *materials{nullptr};
     Light *lights{nullptr};
+    AABB *aabbs{nullptr};
+    RectI *screen_bounds{nullptr};
+
+    INLINE_XPU void updateAABB(AABB &aabb, const Geometry &geo) {
+        if (geo.type == GeometryType_Mesh) {
+            aabb = meshes[geo.id].aabb;
+        } else {
+            aabb.max = geo.type == GeometryType_Tetrahedron ? (SQRT3 / 3.0f) : 1.0f;
+            aabb.min = -aabb.max;
+        }
+        aabb = geo.transform.externAABB(aabb);
+    }
+
+    INLINE_XPU void updateAABBs() {
+        for (u32 i = 0; i < counts.geometries; i++)
+            updateAABB(aabbs[i], geometries[i]);
+    }
 
     u64 last_io_ticks = 0;
     bool last_io_is_save{false};
@@ -87,7 +104,7 @@ struct Scene {
         bvh.height = (u8)counts.geometries;
 
         memory::MonotonicAllocator temp_allocator;
-        u32 capacity = sizeof(BVHBuilder) + sizeof(u32) * counts.geometries + sizeof(BVHNode) * bvh.node_count;
+        u32 capacity = sizeof(BVHBuilder) + (sizeof(u32) + sizeof(AABB) + sizeof(RectI)) * counts.geometries + sizeof(BVHNode) * bvh.node_count;
 
         if (counts.lights && !lights) capacity += sizeof(Material) * counts.lights;
         if (counts.materials && !materials) capacity += sizeof(Material) * counts.materials;
@@ -112,6 +129,9 @@ struct Scene {
         bvh_leaf_geometry_indices = (u32*)memory_allocator->allocate(sizeof(u32) * counts.geometries);
         bvh_builder = (BVHBuilder*)memory_allocator->allocate(sizeof(BVHBuilder));
         *bvh_builder = BVHBuilder{max_leaf_node_count, memory_allocator};
+
+        aabbs = (AABB*)memory_allocator->allocate(sizeof(AABB) * counts.geometries);
+        screen_bounds = (RectI*)memory_allocator->allocate(sizeof(RectI) * counts.geometries);
 
         if (counts.lights && !lights) {
             lights = (Light*)memory_allocator->allocate(sizeof(Light) * counts.lights);
@@ -147,31 +167,30 @@ struct Scene {
             mesh_stack_size += 2;
         }
 
+        updateAABBs();
         updateBVH();
     }
 
-    void updateBVH() {
-        AABB aabb;
-        BVHNode *node = bvh_builder->nodes;
-        Geometry *geometry = geometries;
-        for (u32 i = 0; i < counts.geometries; i++, node++, geometry++) {
-            aabb = geometry->type == GeometryType_Mesh ? meshes[geometry->id].aabb : geometry->getAABB();
-            node->aabb = geometry->transform.externAABB(aabb);
-            node->first_index = bvh_builder->node_ids[i] = i;
+    void updateBVH(u16 max_leaf_size = 1) {
+        for (u32 i = 0; i < counts.geometries; i++) {
+            bvh_builder->nodes[i].aabb = aabbs[i];
+            bvh_builder->nodes[i].first_index = bvh_builder->node_ids[i] = i;
         }
 
-        bvh_builder->build(bvh, counts.geometries, 2);
+        bvh_builder->build(bvh, counts.geometries, max_leaf_size);
 
         for (u32 i = 0; i < counts.geometries; i++)
             bvh_leaf_geometry_indices[i] = bvh_builder->leaf_ids[i];
     }
 
-    INLINE bool castRay(Ray &ray, RayHit &hit) const {
+    INLINE bool castRay(Ray &ray, RayHit &hit, Geometry **hit_geo, Light **hit_light) const {
         static Ray local_ray;
         static RayHit local_hit;
         static Transform xform;
         bool found = false;
-        hit.distance_squared = INFINITY;
+        *hit_geo = nullptr;
+        *hit_light = nullptr;
+        hit.distance = local_hit.distance = INFINITY;
 
         for (u32 i = 0; i < counts.geometries; i++) {
             Geometry &geo = geometries[i];
@@ -183,14 +202,9 @@ struct Scene {
             local_ray.direction_reciprocal = 1.0f / local_ray.direction;
             local_ray.prePrepRay();
             if (local_ray.hitsDefaultBox(local_hit)) {
-                local_hit.position         = xform.externPos(local_hit.position);
-                local_hit.distance_squared = (local_hit.position - ray.origin).squaredLength();
-                if (local_hit.distance_squared < hit.distance_squared) {
-                    hit = local_hit;
-                    hit.geo_type = geo.type;
-                    hit.geo_id = i;
-                    found = true;
-                }
+                hit = local_hit;
+                *hit_geo = geometries + i;
+                found = true;
             }
         }
 
@@ -208,22 +222,19 @@ struct Scene {
                 xform.internPosAndDir(ray.origin, ray.direction, local_ray.origin, local_ray.direction);
                 local_ray.direction_reciprocal = 1.0f / local_ray.direction;
                 local_ray.prePrepRay();
-                if (local_ray.hitsDefaultBox(local_hit)) {
-                    local_hit.position         = xform.externPos(local_hit.position);
-                    local_hit.distance_squared = (local_hit.position - ray.origin).squaredLength();
-                    if (local_hit.distance_squared < hit.distance_squared) {
-                        hit = local_hit;
-                        hit.geo_type = GeometryType_Light;
-                        hit.geo_id = i;
-                        found = true;
-                    }
+                if (local_ray.hitsDefaultSphere(local_hit)) {
+                    hit = local_hit;
+                    *hit_geo = nullptr;
+                    *hit_light = lights + i;
+                    found = true;
                 }
             }
         }
 
         if (found) {
-            hit.distance = sqrtf(hit.distance_squared);
-            hit.normal = geometries[hit.geo_id].transform.externDir(hit.normal).normalized();
+            hit.position = ray[hit.distance];
+            if (*hit_geo)
+            hit.normal = (*hit_geo)->transform.externDir(hit.normal);
         }
 
         return found;

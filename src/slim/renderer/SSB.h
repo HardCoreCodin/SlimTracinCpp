@@ -135,39 +135,28 @@ INLINE_XPU bool computeSSB(RectI &bounds, vec3 &pos, f32 r, f32 focal_length, Di
     return false;
 }
 
-INLINE void updateGeometrySSB(Scene *scene, Viewport *viewport, Geometry *geometry) {
-    f32 radius, min_r, max_r;
-    AABB *aabb;
+INLINE void updateScreenBounds(const Scene &scene, const Viewport &viewport) {
+    Camera &camera = *viewport.camera;
+    vec3 pos;
+    f32 radius;
 
-    vec3 view_space_position = geometry->transform.position - viewport->camera->position;
-    view_space_position = viewport->camera->rotation.inverted() * view_space_position;
-    vec3 &scale{geometry->transform.scale};
-    switch (geometry->type) {
-        case GeometryType_Quad       : radius = scale.length();         break;
-        case GeometryType_Box        : radius = scale.length();         break;
-        case GeometryType_Tetrahedron: radius = scale.maximum() * SQRT2; break;
-        case GeometryType_Sphere     : radius = scale.maximum();         break;
-        case GeometryType_Mesh       :
-            aabb   = &scene->meshes[geometry->id].aabb;
-            min_r  = (scale * aabb->min).length();
-            max_r  = (scale * aabb->max).length();
-            radius = max_r > min_r ? max_r : min_r;
-            break;
-        default:
-            return;
+    for (u32 i = 0; i < scene.counts.geometries; i++) {
+        Geometry &geo = scene.geometries[i];
+        vec3 &scale = geo.transform.scale;
+        AABB &aabb = scene.meshes[geo.id].aabb;
+
+        switch (geo.type) {
+            case GeometryType_Quad       : radius = scale.length();         break;
+            case GeometryType_Box        : radius = scale.length();         break;
+            case GeometryType_Tetrahedron: radius = scale.maximum() * SQRT2; break;
+            case GeometryType_Sphere     : radius = scale.maximum();         break;
+            case GeometryType_Mesh       : radius = Max((scale * aabb.min).length(), (scale * aabb.max).length()); break;
+            default: continue;
+        }
+
+        pos = camera.internPos(geo.transform.position);
+        geo.flags &= ~GEOMETRY_IS_VISIBLE;
+        if (computeSSB(scene.screen_bounds[i], pos, radius, camera.focal_length, viewport.canvas.dimensions))
+            geo.flags |= GEOMETRY_IS_VISIBLE;
     }
-
-    geometry->flags &= ~GEOMETRY_IS_VISIBLE;
-    if (computeSSB(geometry->screen_bounds,
-                   view_space_position, radius,
-                   viewport->camera->focal_length,
-                   viewport->canvas.dimensions))
-        geometry->flags |= GEOMETRY_IS_VISIBLE;
-}
-
-void updateSceneSSB(Scene *scene, Viewport *viewport) {
-    for (u32 i = 0; i < scene->counts.geometries; i++)
-        updateGeometrySSB(scene, viewport, scene->geometries + i);
-
-//    uploadGeometries(scene);
 }

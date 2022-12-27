@@ -31,7 +31,7 @@ void drawSSB(const Scene &scene, Canvas &canvas) {
                 default:
                     continue;
             }
-            canvas.drawRect(geometry.screen_bounds, color);
+            canvas.drawRect(scene.screen_bounds[i], color);
         }
     }
 }
@@ -121,10 +121,11 @@ struct RayTracer {
                      scene_tracer.scene.textures : nullptr,
                      scene_tracer.pixel_area_over_focal_length_squared);
         switch (mode) {
-            case RenderMode_UVs     : return shaded.getColorByUV();
-            case RenderMode_Depth   : return shaded.getColorByDistance();
-            case RenderMode_MipLevel: return shaded.getColorByMipLevel(scene_tracer.scene.textures[0]);
-            case RenderMode_Normals : return directionToColor(shaded.sampleNormal(scene_tracer.scene.textures));
+            case RenderMode_UVs      : return shaded.getColorByUV();
+            case RenderMode_Depth    : return shaded.getColorByDistance();
+            case RenderMode_MipLevel : return shaded.getColorByMipLevel(scene_tracer.scene.textures[0]);
+            case RenderMode_Normals  : return directionToColor(shaded.normal);
+            case RenderMode_NormalMap: return directionToColor(shaded.sampleNormal(scene_tracer.scene.textures));
             default:
                 return shaded.material->isEmissive() ? (shaded.from_behind ? Black : shaded.material->emission) :
                        shadeSurface(ray, scene_tracer, lights_shader, max_depth, shaded);
@@ -132,13 +133,14 @@ struct RayTracer {
     }
 
     void renderPixel(Ray &ray, const vec3 &camera_position, const mat3 &inverted_camera_rotation, u16 x, u16 y, Color &color) {
-        f32 depth = shaded.distance = shaded.distance_squared = INFINITY;
+        f32 depth = INFINITY;
         color = Black;
         vec3 Ro = ray.origin;
         vec3 Rd = ray.direction;
         bool hit_light_only = false;
-        bool hit_found = scene_tracer.trace(ray, shaded);
-        if (hit_found) {
+        Geometry *hit_geo = scene_tracer.trace(ray, shaded);
+        if (hit_geo) {
+            scene_tracer.finalizeHitFromGeo(ray, shaded, hit_geo);
             depth = (inverted_camera_rotation * (shaded.position - camera_position)).z;
             color = shade(ray);
         } else if (mode == RenderMode_Beauty && scene_tracer.scene.lights) {
@@ -149,7 +151,7 @@ struct RayTracer {
         if (mode == RenderMode_Beauty)
             color.applyToneMapping();
 
-        if (hit_found || hit_light_only)
+        if (hit_geo || hit_light_only)
             canvas.setPixel(x, y, color, 1, depth);
     }
 

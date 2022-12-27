@@ -6,19 +6,12 @@
 struct RayHit {
     vec3 position, normal;
     UV uv;
-    f32 distance, distance_squared, NdotV, uv_coverage_over_surface_area, uv_coverage;
-    u32 geo_id, material_id;
-    enum GeometryType geo_type = GeometryType_None;
+    f32 distance, uv_coverage_over_surface_area;
+    u32 id;
     bool from_behind = false;
-
-    INLINE_XPU void updateUVCoverage(f32 pixel_area_over_focal_length_squared) {
-        uv_coverage = uv_coverage_over_surface_area * pixel_area_over_focal_length_squared * distance_squared;
-        uv_coverage /= NdotV;
-    };
 
     INLINE_XPU void updateUV(UV uv_repeat) {
         uv *= uv_repeat;
-        uv_coverage /= uv_repeat.u * uv_repeat.v;
     };
 };
 
@@ -36,23 +29,13 @@ struct Ray {
         scaled_origin = -origin * direction_reciprocal;
     }
 
-    INLINE_XPU bool hitsAABB(const AABB &aabb, f32 closest_distance, f32 &distance) {
+    INLINE_XPU bool hitsAABB(const AABB &aabb, f32 &distance) {
         vec3 min_t{*(&aabb.min.x + octant_shifts.x), *(&aabb.min.y + octant_shifts.y), *(&aabb.min.z + octant_shifts.z)};
         vec3 max_t{*(&aabb.max.x - octant_shifts.x), *(&aabb.max.y - octant_shifts.y), *(&aabb.max.z - octant_shifts.z)};
         min_t = min_t.mulAdd(direction_reciprocal, scaled_origin);
         max_t = max_t.mulAdd(direction_reciprocal, scaled_origin);
-
-        max_t.x = max_t.x < max_t.y ? max_t.x : max_t.y;
-        max_t.x = max_t.x < max_t.z ? max_t.x : max_t.z;
-        max_t.x = max_t.x < closest_distance ? max_t.x : closest_distance;
-
-        min_t.x = min_t.x > min_t.y ? min_t.x : min_t.y;
-        min_t.x = min_t.x > min_t.z ? min_t.x : min_t.z;
-        min_t.x = min_t.x > 0 ? min_t.x : 0;
-
-        distance = min_t.x;
-
-        return min_t.x <= max_t.x;
+        distance = Max(0, min_t.maximum());
+        return distance <= max_t.minimum();
     }
 
     INLINE_XPU bool hitsPlane(const vec3 &plane_origin, const vec3 &plane_normal, RayHit &hit) {
@@ -69,9 +52,12 @@ struct Ray {
         if (hit.from_behind == ray_is_facing_the_plane) // The ray can't hit the plane
             return false;
 
-        hit.distance = NdotRoP / NdotRd;
-        hit.distance_squared = hit.distance * hit.distance;
-        hit.position = at(hit.distance);
+        f32 t =  NdotRoP / NdotRd;
+        if (t > hit.distance)
+            return false;
+
+        hit.distance = t;
+        hit.position = at(t);
         hit.normal = plane_normal;
 
         return true;
@@ -88,9 +74,11 @@ struct Ray {
         if (hit.from_behind == direction.y < 0) // The ray can't hit the plane
             return false;
 
-        hit.distance = fabsf(origin.y * direction_reciprocal.y);
-        hit.position = at(hit.distance);
+        f32 t = fabsf(origin.y * direction_reciprocal.y);
+        if (t > hit.distance)
+            return false;
 
+        hit.position = at(t);
         if (hit.position.x < -1 ||
             hit.position.x > +1 ||
             hit.position.z < -1 ||
@@ -105,10 +93,10 @@ struct Ray {
         if (is_transparent && hit.uv.onCheckerboard())
             return false;
 
-        hit.normal = {0, 1, 0};
-        hit.NdotV = -direction.y;
+        hit.distance = t;
+        hit.normal.x = hit.normal.z = 0.0f;
+        hit.normal.y = 1.0f;
         hit.uv_coverage_over_surface_area = 0.25f;
-        hit.distance_squared = hit.distance * hit.distance;
 
         return true;
     }
@@ -116,91 +104,98 @@ struct Ray {
     INLINE_XPU BoxSide hitsDefaultBox(RayHit &hit, bool is_transparent = false) {
         vec3 signed_rcp{faces};
         signed_rcp *= direction_reciprocal;
-        vec3 Near{scaled_origin - signed_rcp};
-        vec3 Far{scaled_origin + signed_rcp};
+        vec3 near_t{scaled_origin - signed_rcp};
+        vec3 far_t{scaled_origin + signed_rcp};
 
-        BoxSide near_side, far_side, side;
-        f32 far_hit_t = Far.minimum(&far_side);
+        BoxSide side;
+        Axis near_axis, far_axis;
+        f32 far_hit_t = far_t.minimum(far_axis);
         if (far_hit_t < 0) // Further-away hit is behind the ray - tracers can not occur.
             return BoxSide_None;
 
-        f32 near_hit_t = Near.maximum(&near_side);
-        if (far_hit_t < (near_hit_t > 0 ? near_hit_t : 0))
+        f32 near_hit_t = near_t.maximum(near_axis);
+        if (near_hit_t > hit.distance || far_hit_t < (near_hit_t > 0 ? near_hit_t : 0))
             return BoxSide_None;
 
-        hit.distance = near_hit_t;
+        f32 t = near_hit_t;
         hit.from_behind = near_hit_t < 0; // Near hit is behind the ray, far hit is in front of it: hit is from behind
         if (hit.from_behind) {
-            hit.distance = far_hit_t;
-            side = far_side;
-        } else
-            side = near_side;
+            if (far_hit_t > hit.distance)
+                return BoxSide_None;
 
-        hit.position = at(hit.distance);
+            t = far_hit_t;
+            side = octant_shifts.getBoxSide(far_axis);
+        } else
+            side = octant_shifts.getBoxSide(near_axis);
+
+        hit.position = at(t);
         hit.uv.setByBoxSide(side, hit.position.x, hit.position.y, hit.position.z);
 
         if (is_transparent && hit.uv.onCheckerboard()) {
-            if (hit.from_behind)
+            if (hit.from_behind || far_hit_t > hit.distance)
                 return BoxSide_None;
 
+            side = octant_shifts.getBoxSide(far_axis);
             hit.from_behind = true;
-            side = far_side;
-            hit.distance = far_hit_t;
-            hit.position = at(far_hit_t);
+            t = far_hit_t;
+            hit.position = at(t);
             hit.uv.setByBoxSide(side, hit.position.x, hit.position.y, hit.position.z);
             if (hit.uv.onCheckerboard())
                 return BoxSide_None;
 
         }
 
-        hit.normal.x = side == BoxSide_Right ? 1.0f : 0.0f;
-        hit.normal.y = side == BoxSide_Top ? 1.0f : 0.0f;
-        hit.normal.z = side == BoxSide_Front ? 1.0f : 0.0f;
-        hit.NdotV = -hit.normal.dot(direction);
-        hit.distance_squared = hit.distance * hit.distance;
+        hit.distance = t;
+        hit.normal.x = (f32)((i32)(side == BoxSide_Right) - (i32)(side == BoxSide_Left));
+        hit.normal.y = (f32)((i32)(side == BoxSide_Top) - (i32)(side == BoxSide_Bottom));
+        hit.normal.z = (f32)((i32)(side == BoxSide_Front) - (i32)(side == BoxSide_Back));
+        if (hit.from_behind) hit.normal = -hit.normal;
         hit.uv_coverage_over_surface_area = 0.25f;
 
         return side;
     }
 
     INLINE_XPU bool hitsDefaultSphere(RayHit &hit, bool is_transparent = false) {
-        f32 t_to_closest = -origin.dot(direction);
-        if (t_to_closest <= 0)// Ray is aiming away from the sphere
+        f32 b = -(direction.dot(origin));
+        f32 a = direction.squaredLength();
+        f32 c = 1.0f - origin.squaredLength();
+        f32 delta_squared = b*b + a*c;
+        if (delta_squared < 0)
             return false;
 
-        hit.distance_squared = origin.squaredLength() - t_to_closest*t_to_closest;
+        a = 1.0f / a;
+        b *= a;
+        f32 delta = sqrtf(delta_squared) * a;
 
-        f32 delta_squared = 1 - hit.distance_squared;
-        if (delta_squared <= 0) { // Ray missed the sphere
-            hit.distance = t_to_closest;
+        f32 t = b - delta;
+        if (t > hit.distance)
             return false;
-        }
-        // Inside the geometry
-        f32 delta = sqrtf(delta_squared);
 
-        hit.distance = t_to_closest - delta;
-        bool has_outer_hit = hit.distance > 0;
+        bool has_outer_hit = t > 0;
         if (has_outer_hit) {
-            hit.position = at(hit.distance);
             if (is_transparent) {
-                hit.uv.setBySphere(hit.position.x, hit.position.y, hit.position.z);
+                hit.normal = at(t);
+                hit.uv.setBySphere(hit.normal.x, hit.normal.y, hit.normal.z);
                 if (!hit.uv.onCheckerboard())
                     has_outer_hit = false;
             }
         }
         if (!has_outer_hit) {
-            hit.distance = t_to_closest + delta;
-            hit.position = at(hit.distance);
+            t = b + delta;
+            if (t <= 0 || t > hit.distance)
+                return false;
+
             if (is_transparent) {
-                hit.uv.setBySphere(hit.position.x, hit.position.y, hit.position.z);
+                hit.normal = at(t);
+                hit.uv.setBySphere(hit.normal.x, hit.normal.y, hit.normal.z);
                 if (!hit.uv.onCheckerboard())
                     return false;
             }
         }
 
+        hit.normal = at(t);
         hit.from_behind = !has_outer_hit;
-        hit.normal = hit.position;
-        hit.NdotV = -hit.normal.dot(direction);
+        hit.distance = t;
         hit.uv_coverage_over_surface_area = UNIT_SPHERE_AREA_OVER_SIX;
 
         return true;
@@ -211,12 +206,12 @@ struct Ray {
         vec3 tangent_pos;
         vec3 face_normal;
         bool found_triangle = false;
-        f32 closest_distance = INFINITY;
 
         const f32 _0577 = 0.577350259f;
         const f32 _0288 = 0.288675159f;
 
-        RayHit closest_hit;
+        RayHit current_hit;
+        current_hit.uv_coverage_over_surface_area = 4.0f / SQRT3;
 
         for (u8 t = 0; t < 4; t++) {
             tangent_pos = face_normal = vec3{t == 3 ? _0577 : -_0577};
@@ -227,7 +222,8 @@ struct Ray {
                 case 3: tangent_pos.y = -_0577; break;
             }
 
-            if (!hitsPlane(tangent_pos, face_normal, hit))
+            current_hit.distance = hit.distance;
+            if (!hitsPlane(tangent_pos, face_normal, current_hit))
                 continue;
 
             switch (t) {
@@ -285,27 +281,21 @@ struct Ray {
                     break;
             }
 
-            tangent_pos = tangent_matrix * (hit.position - tangent_pos);
+            tangent_pos = tangent_matrix * (current_hit.position - tangent_pos);
             if (tangent_pos.x < 0 || tangent_pos.y < 0 || tangent_pos.y + tangent_pos.x > 1)
                 continue;
 
-            hit.uv.x = tangent_pos.x;
-            hit.uv.y = tangent_pos.y;
+            current_hit.uv.x = tangent_pos.x;
+            current_hit.uv.y = tangent_pos.y;
 
-            if (is_transparent && hit.uv.onCheckerboard())
+            if (is_transparent && current_hit.uv.onCheckerboard())
                 continue;
 
-            if (hit.distance < closest_distance) {
-                closest_distance = hit.distance;
-                closest_hit = hit;
-                closest_hit.uv_coverage_over_surface_area = 4.0f / SQRT3;
-                closest_hit.NdotV = -hit.normal.dot(direction);
+            if (current_hit.distance < hit.distance) {
+                hit = current_hit;
                 found_triangle = true;
             }
         }
-
-        if (found_triangle)
-            hit = closest_hit;
 
         return found_triangle;
     }
