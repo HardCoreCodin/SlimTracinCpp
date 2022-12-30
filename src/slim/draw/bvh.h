@@ -19,7 +19,9 @@ void drawBVH(const BVH &bvh, const Transform &transform, const Viewport &viewpor
         box_transform.scale *= (node.aabb.max - node.aabb.min) * 0.5f;
         box_transform.position = transform.externPos((node.aabb.min + node.aabb.max) * 0.5f);
 
-        drawBox(box, box_transform, viewport, node.leaf_count ? BrightMagenta : (node_id ? BrightGreen : BrightCyan),
-                opacity, line_width);
+        drawBox(box, box_transform, viewport,
+                node.leaf_count ? Red : (node_id ? BrightBlue : BrightCyan),
+                node.leaf_count ? opacity * 2.0f : opacity * 0.5f,
+                line_width);
     }
 }

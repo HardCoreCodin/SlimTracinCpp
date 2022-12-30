@@ -3,7 +3,7 @@
 #include "./mesh.h"
 
 struct SceneTracer {
-    const Scene &scene;
+    Scene &scene;
     MeshTracer mesh_tracer{nullptr, 0};
     u32 stack_size = 0;
     u32 *stack = nullptr;
@@ -12,12 +12,12 @@ struct SceneTracer {
     f32 pixel_area_over_focal_length_squared;
     bool scene_has_emissive_quads = false;
 
-    INLINE_XPU SceneTracer(const Scene &scene, u32 *stack, u32 stack_size, u32 *mesh_stack, u32 mesh_stack_size) :
+    INLINE_XPU SceneTracer(Scene &scene, u32 *stack, u32 stack_size, u32 *mesh_stack, u32 mesh_stack_size) :
         scene{scene}, mesh_tracer{mesh_stack, mesh_stack_size}, stack{stack}, stack_size{stack_size} {
         scene_has_emissive_quads = _hasEmissiveQuads();
     }
 
-    SceneTracer(const Scene &scene, u32 stack_size, u32 mesh_stack_size = 0, memory::MonotonicAllocator *memory_allocator = nullptr) :
+    SceneTracer(Scene &scene, u32 stack_size, u32 mesh_stack_size = 0, memory::MonotonicAllocator *memory_allocator = nullptr) :
         scene{scene}, mesh_tracer{nullptr, 0}, stack_size{stack_size}
     {
         memory::MonotonicAllocator temp_allocator;
@@ -135,10 +135,36 @@ struct SceneTracer {
             case GeometryType_Quad       : return local_ray.hitsDefaultQuad(local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
             case GeometryType_Box        : return local_ray.hitsDefaultBox(local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
             case GeometryType_Sphere     : return local_ray.hitsDefaultSphere(local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
-            case GeometryType_Tetrahedron: return local_ray.hitsDefaultTetrahedron(local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
+            case GeometryType_Tet: return local_ray.hitsDefaultTetrahedron(local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
             case GeometryType_Mesh       : return mesh_tracer.trace(scene.meshes[geo.id], local_ray, local_hit, any_hit);
             default: return false;
         }
+    }
+
+    INLINE_XPU Geometry* hitGeometries(Ray &ray, RayHit &hit, i32 x, i32 y) {
+        hit.distance = local_hit.distance = INFINITY;
+        ray.direction_reciprocal = 1.0f / ray.direction;
+        ray.prePrepRay();
+
+        Geometry *hit_geo = nullptr;
+
+        for (u32 i = 0; i < scene.counts.geometries; i++) {
+            Geometry &geo = scene.geometries[i];
+            RectI &bounds = scene.screen_bounds[i];
+
+            if (geo.flags & GEOMETRY_IS_VISIBLE &&
+                x >=  bounds.left &&
+                x <=  bounds.right &&
+                y >=  bounds.top &&
+                y <=  bounds.bottom &&
+                hitGeometry(geo, ray) &&
+                local_hit.distance < hit.distance) {
+                hit = local_hit;
+                hit_geo = &geo;
+            }
+        }
+
+        return hit_geo;
     }
 
     INLINE_XPU Geometry* hitGeometries(const u32 *geometry_indices, u32 geo_count, Ray &ray, RayHit &hit, bool any_hit) {
@@ -211,7 +237,7 @@ struct SceneTracer {
 
         hit.position = ray[hit.distance];
         hit.normal = hit_geo->transform.externDir(hit.normal);
-        hit.id = hit_geo - scene.geometries;
+        hit.id = (u32)(hit_geo - scene.geometries);
 //        if (hit.from_behind) {
 //            hit.normal = -hit.normal;
 //            hit.position = hit.normal.scaleAdd(-TRACE_OFFSET*2, hit.position);

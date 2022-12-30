@@ -139,6 +139,44 @@ struct Frustum {
         return true;
     }
 
+    void checkEdge(Edge &edge, f32 focal_length, f32 aspect_ratio, Sides &from_sides, Sides &to_sides) const {
+        from_sides.mask = 0;
+        to_sides.mask = 0;
+
+        from_sides.back = edge.from.z < near_clipping_plane_distance;
+        to_sides.back = edge.to.z < near_clipping_plane_distance;
+        from_sides.front = edge.from.z > far_clipping_plane_distance;
+        to_sides.front = edge.to.z > far_clipping_plane_distance;
+
+        // Left plane (facing to the right):
+        vec3 N{focal_length, 0, aspect_ratio};
+        f32 NdotA = N.dot(edge.from);
+        f32 NdotB = N.dot(edge.to);
+        from_sides.left = NdotA < 0;
+        to_sides.left = NdotB < 0;
+
+        // Right plane (facing to the left):
+        N.x = -N.x;
+        NdotA = N.dot(edge.from);
+        NdotB = N.dot(edge.to);
+        from_sides.right = NdotA < 0;
+        to_sides.right = NdotB < 0;
+
+        // Bottom plane (facing up):
+        N = {0, focal_length, 1};
+        NdotA = N.dot(edge.from);
+        NdotB = N.dot(edge.to);
+        from_sides.bottom = NdotA < 0;
+        to_sides.bottom = NdotB < 0;
+
+        // Top plane (facing down):
+        N.y = -N.y;
+        NdotA = N.dot(edge.from);
+        NdotB = N.dot(edge.to);
+        from_sides.top = NdotA < 0;
+        to_sides.top = NdotB < 0;
+    }
+
     INLINE void projectPoint(vec3 &point, const Dimensions &dimensions) const {
         point.x = ((projection.scale.x * point.x / point.z) + 1) * dimensions.h_width;
         point.y = ((projection.scale.y * point.y / point.z) + 1) * dimensions.h_height;

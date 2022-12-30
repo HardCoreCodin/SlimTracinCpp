@@ -26,7 +26,7 @@ void drawSSB(const Scene &scene, Canvas &canvas) {
                 case GeometryType_Box        : color = Cyan;    break;
                 case GeometryType_Quad       : color = White;   break;
                 case GeometryType_Sphere     : color = Yellow;  break;
-                case GeometryType_Tetrahedron: color = Magenta; break;
+                case GeometryType_Tet: color = Magenta; break;
                 case GeometryType_Mesh       : color = Red;     break;
                 default:
                     continue;
@@ -79,7 +79,7 @@ void drawSSB(const Scene &scene, Canvas &canvas) {
 //                    case GeometryType_Box        : color = Cyan;    break;
 //                    case GeometryType_Quad       : color = White;   break;
 //                    case GeometryType_Sphere     : color = Yellow;  break;
-//                    case GeometryType_Tetrahedron: color = Magenta; break;
+//                    case GeometryType_Tet: color = Magenta; break;
 //                    case GeometryType_Mesh       :
 //                        drawMeshAccelerationStructure(viewport, scene.meshes + geometry.id, geometry, &box_geometry);
 //                        continue;
@@ -98,20 +98,43 @@ void drawSSB(const Scene &scene, Canvas &canvas) {
 //}
 
 struct RayTracer {
-    const Canvas &canvas;
     SceneTracer scene_tracer;
     LightsShader lights_shader;
-    Shaded shaded;
-
     enum RenderMode mode = RenderMode_Beauty;
+    Shaded shaded;
+    mat3 inverted_camera_rotation;
+    vec3 camera_position;
     bool use_gpu = false;
+    bool use_ssb = false;
     u32 max_depth = 2;
 
-    INLINE_XPU RayTracer(const Canvas &canvas, const Scene &scene, u32 *stack, u32 stack_size, u32 *mesh_stack, u32 mesh_stack_size, RenderMode mode = RenderMode_Beauty) :
-            canvas{canvas}, scene_tracer{scene, stack, stack_size, mesh_stack, mesh_stack_size}, lights_shader{scene.lights, scene.counts.lights}, mode{mode} {}
+    INLINE_XPU RayTracer(Scene &scene, u32 *stack, u32 stack_size, u32 *mesh_stack, u32 mesh_stack_size, RenderMode mode = RenderMode_Beauty) :
+            scene_tracer{scene, stack, stack_size, mesh_stack, mesh_stack_size}, lights_shader{scene.lights, scene.counts.lights}, mode{mode} {}
 
-    RayTracer(const Canvas &canvas, const Scene &scene, u32 stack_size, u32 mesh_stack_size = 0, RenderMode mode = RenderMode_Beauty, memory::MonotonicAllocator *memory_allocator = nullptr) :
-            canvas{canvas}, scene_tracer{scene, stack_size, mesh_stack_size, memory_allocator}, lights_shader{scene.lights, scene.counts.lights}, mode{mode}  {}
+    RayTracer(Scene &scene, u32 stack_size, u32 mesh_stack_size = 0, RenderMode mode = RenderMode_Beauty, memory::MonotonicAllocator *memory_allocator = nullptr) :
+            scene_tracer{scene, stack_size, mesh_stack_size, memory_allocator}, lights_shader{scene.lights, scene.counts.lights}, mode{mode}  {}
+
+    void render(const Viewport &viewport, bool update_scene = true) {
+        Canvas &canvas = viewport.canvas;
+        Camera &camera = *viewport.camera;
+        Scene &scene = scene_tracer.scene;
+
+        f32 hw = viewport.dimensions.h_width;
+        f32 fl = camera.focal_length;
+        scene_tracer.pixel_area_over_focal_length_squared = 1.0f / (hw * hw * hw * fl * fl);
+        inverted_camera_rotation = camera.rotation.inverted();
+        camera_position = camera.position;
+
+        if (update_scene) {
+            scene.updateAABBs();
+            scene.updateBVH();
+            if (use_ssb) updateScreenBounds(scene, viewport);
+        }
+        if (use_gpu) renderOnGPU(canvas, camera);
+        else         renderOnCPU(canvas, camera);
+    }
+
+private:
 
     INLINE_XPU Color shade(Ray &ray) {
         shaded.reset(ray,
@@ -132,13 +155,13 @@ struct RayTracer {
         }
     }
 
-    void renderPixel(Ray &ray, const vec3 &camera_position, const mat3 &inverted_camera_rotation, u16 x, u16 y, Color &color) {
+    INLINE_XPU void renderPixel(const Canvas &canvas, Ray &ray, u32 x, u32 y, Color &color) {
         f32 depth = INFINITY;
         color = Black;
         vec3 Ro = ray.origin;
         vec3 Rd = ray.direction;
         bool hit_light_only = false;
-        Geometry *hit_geo = scene_tracer.trace(ray, shaded);
+        Geometry *hit_geo = use_ssb ? scene_tracer.hitGeometries(ray, shaded, x, y) : scene_tracer.trace(ray, shaded);
         if (hit_geo) {
             scene_tracer.finalizeHitFromGeo(ray, shaded, hit_geo);
             depth = (inverted_camera_rotation * (shaded.position - camera_position)).z;
@@ -155,10 +178,8 @@ struct RayTracer {
             canvas.setPixel(x, y, color, 1, depth);
     }
 
-    void renderOnCPU(const Camera &camera) {
-        mat3 inverted_camera_rotation = camera.rotation.inverted();
-
-        f32 normalization_factor = 2.0f / canvas.dimensions.f_height;
+    void renderOnCPU(const Canvas &canvas, const Camera &camera) {
+        f32 normalization_factor = (canvas.antialias == SSAA ? 1.0f : 2.0f) / canvas.dimensions.f_height;
 
         vec3 start = camera.getTopLeftCornerOfProjectionPlane(canvas.dimensions.width_over_height);
         vec3 right = camera.right * normalization_factor;
@@ -169,14 +190,16 @@ struct RayTracer {
         Ray ray;
         ray.origin = camera.position;
 
+        u16 width = canvas.dimensions.width * (canvas.antialias == SSAA ? 2 : 1);
+        u16 height = canvas.dimensions.height * (canvas.antialias == SSAA ? 2 : 1);
         Pixel *pixel = canvas.pixels;
-        for (u16 y = 0; y < canvas.dimensions.height; y++) {
+        for (u16 y = 0; y < height; y++) {
             current = start;
-            for (u16 x = 0; x < canvas.dimensions.width; x++, pixel++) {
+            for (u16 x = 0; x < width; x++, pixel++) {
                 ray.origin = camera.position;
                 ray.direction = current.normalized();
 
-                renderPixel(ray, camera.position, inverted_camera_rotation, x, y, color);
+                renderPixel(canvas, ray, x, y, color);
 
                 current += right;
             }
@@ -185,13 +208,8 @@ struct RayTracer {
     }
 
 #ifdef __CUDACC__
-    void render(const Camera &camera) {
-        if (use_gpu) renderOnGPU(camera);
-         else        renderOnCPU(camera);
-    }
-
-    void renderSceneOnGPU(Scene *scene, Trace *trace, Camera *camera, Canvas &canvas, RenderMode mode) {
-        Dimensions *dim = &viewport.frame_buffer.dimensions;
+    void renderOnGPU(canvas, camera) {
+        Dimensions &dim = canvas.dimensions;
         u32 pixel_count = dim.width_times_height;
         u32 threads = 256;
         u32 blocks  = pixel_count / threads;
@@ -234,14 +252,6 @@ struct RayTracer {
     }
 
 #else
-    void render(const Camera &camera) {
-        scene_tracer.pixel_area_over_focal_length_squared = 1.0f / (
-                canvas.dimensions.h_width *
-                canvas.dimensions.h_width *
-                canvas.dimensions.h_width *
-                camera.focal_length *
-                camera.focal_length);
-        renderOnCPU(camera);
-    }
+    void renderOnGPU(const Canvas &canvas, const Camera &camera) { renderOnCPU(canvas, camera); }
 #endif
 };

@@ -159,42 +159,33 @@ struct Ray {
         f32 b = -(direction.dot(origin));
         f32 a = direction.squaredLength();
         f32 c = 1.0f - origin.squaredLength();
-        f32 delta_squared = b*b + a*c;
-        if (delta_squared < 0)
+        f32 d = b*b + a*c;
+        if (d < 0)
             return false;
 
         a = 1.0f / a;
         b *= a;
-        f32 delta = sqrtf(delta_squared) * a;
+        f32 delta = sqrtf(d) * a;
 
         f32 t = b - delta;
         if (t > hit.distance)
             return false;
 
-        bool has_outer_hit = t > 0;
-        if (has_outer_hit) {
-            if (is_transparent) {
-                hit.normal = at(t);
-                hit.uv.setBySphere(hit.normal.x, hit.normal.y, hit.normal.z);
-                if (!hit.uv.onCheckerboard())
-                    has_outer_hit = false;
-            }
-        }
-        if (!has_outer_hit) {
+        hit.normal = at(t);
+        hit.uv.setBySphere(hit.normal.x, hit.normal.y, hit.normal.z);
+
+        hit.from_behind = t <= 0 || (is_transparent && hit.uv.onCheckerboard());
+        if (hit.from_behind) {
             t = b + delta;
             if (t <= 0 || t > hit.distance)
                 return false;
 
-            if (is_transparent) {
-                hit.normal = at(t);
-                hit.uv.setBySphere(hit.normal.x, hit.normal.y, hit.normal.z);
-                if (!hit.uv.onCheckerboard())
-                    return false;
-            }
+            hit.normal = at(t);
+            hit.uv.setBySphere(hit.normal.x, hit.normal.y, hit.normal.z);
+            if (is_transparent && hit.uv.onCheckerboard())
+                return false;
         }
 
-        hit.normal = at(t);
-        hit.from_behind = !has_outer_hit;
         hit.distance = t;
         hit.uv_coverage_over_surface_area = UNIT_SPHERE_AREA_OVER_SIX;
 
@@ -207,19 +198,16 @@ struct Ray {
         vec3 face_normal;
         bool found_triangle = false;
 
-        const f32 _0577 = 0.577350259f;
-        const f32 _0288 = 0.288675159f;
-
         RayHit current_hit;
         current_hit.uv_coverage_over_surface_area = 4.0f / SQRT3;
 
         for (u8 t = 0; t < 4; t++) {
-            tangent_pos = face_normal = vec3{t == 3 ? _0577 : -_0577};
+            tangent_pos = face_normal = vec3{t == 3 ? TET_MAX : -TET_MAX};
             switch (t) {
-                case 0: face_normal.y = _0577; break;
-                case 1: face_normal.x = _0577; break;
-                case 2: face_normal.z = _0577; break;
-                case 3: tangent_pos.y = -_0577; break;
+                case 0: face_normal.y = TET_MAX; break;
+                case 1: face_normal.x = TET_MAX; break;
+                case 2: face_normal.z = TET_MAX; break;
+                case 3: tangent_pos.y = -TET_MAX; break;
             }
 
             current_hit.distance = hit.distance;
@@ -228,56 +216,56 @@ struct Ray {
 
             switch (t) {
                 case 0:
-                    tangent_matrix.X.x = _0577;
-                    tangent_matrix.X.y = -_0288;
-                    tangent_matrix.X.z = -_0577;
+                    tangent_matrix.X.x = TET_MAX;
+                    tangent_matrix.X.y = -TET_MIN;
+                    tangent_matrix.X.z = -TET_MAX;
 
-                    tangent_matrix.Y.x = _0288;
-                    tangent_matrix.Y.y = _0288;
-                    tangent_matrix.Y.z = _0577;
+                    tangent_matrix.Y.x = TET_MIN;
+                    tangent_matrix.Y.y = TET_MIN;
+                    tangent_matrix.Y.z = TET_MAX;
 
-                    tangent_matrix.Z.x = -_0288;
-                    tangent_matrix.Z.y = _0577;
-                    tangent_matrix.Z.z = -_0577;
+                    tangent_matrix.Z.x = -TET_MIN;
+                    tangent_matrix.Z.y = TET_MAX;
+                    tangent_matrix.Z.z = -TET_MAX;
                     break;
                 case 1:
-                    tangent_matrix.X.x = _0288;
-                    tangent_matrix.X.y = _0288;
-                    tangent_matrix.X.z = _0577;
+                    tangent_matrix.X.x = TET_MIN;
+                    tangent_matrix.X.y = TET_MIN;
+                    tangent_matrix.X.z = TET_MAX;
 
-                    tangent_matrix.Y.x = -_0288;
-                    tangent_matrix.Y.y = _0577;
-                    tangent_matrix.Y.z = -_0577;
+                    tangent_matrix.Y.x = -TET_MIN;
+                    tangent_matrix.Y.y = TET_MAX;
+                    tangent_matrix.Y.z = -TET_MAX;
 
-                    tangent_matrix.Z.x = _0577;
-                    tangent_matrix.Z.y = -_0288;
-                    tangent_matrix.Z.z = -_0577;
+                    tangent_matrix.Z.x = TET_MAX;
+                    tangent_matrix.Z.y = -TET_MIN;
+                    tangent_matrix.Z.z = -TET_MAX;
                     break;
                 case 2:
-                    tangent_matrix.X.x = -_0288;
-                    tangent_matrix.X.y = _0577;
-                    tangent_matrix.X.z = -_0577;
+                    tangent_matrix.X.x = -TET_MIN;
+                    tangent_matrix.X.y = TET_MAX;
+                    tangent_matrix.X.z = -TET_MAX;
 
-                    tangent_matrix.Y.x = _0577;
-                    tangent_matrix.Y.y = -_0288;
-                    tangent_matrix.Y.z = -_0577;
+                    tangent_matrix.Y.x = TET_MAX;
+                    tangent_matrix.Y.y = -TET_MIN;
+                    tangent_matrix.Y.z = -TET_MAX;
 
-                    tangent_matrix.Z.x = _0288;
-                    tangent_matrix.Z.y = _0288;
-                    tangent_matrix.Z.z = _0577;
+                    tangent_matrix.Z.x = TET_MIN;
+                    tangent_matrix.Z.y = TET_MIN;
+                    tangent_matrix.Z.z = TET_MAX;
                     break;
                 case 3:
-                    tangent_matrix.X.x = -_0577;
-                    tangent_matrix.X.y = _0288;
-                    tangent_matrix.X.z = _0577;
+                    tangent_matrix.X.x = -TET_MAX;
+                    tangent_matrix.X.y = TET_MIN;
+                    tangent_matrix.X.z = TET_MAX;
 
-                    tangent_matrix.Y.x = _0288;
-                    tangent_matrix.Y.y = _0288;
-                    tangent_matrix.Y.z = _0577;
+                    tangent_matrix.Y.x = TET_MIN;
+                    tangent_matrix.Y.y = TET_MIN;
+                    tangent_matrix.Y.z = TET_MAX;
 
-                    tangent_matrix.Z.x = _0288;
-                    tangent_matrix.Z.y = -_0577;
-                    tangent_matrix.Z.z = _0577;
+                    tangent_matrix.Z.x = TET_MIN;
+                    tangent_matrix.Z.y = -TET_MAX;
+                    tangent_matrix.Z.z = TET_MAX;
                     break;
             }
 

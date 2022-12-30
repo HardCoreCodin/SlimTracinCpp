@@ -3,6 +3,8 @@
 #include "./mesh.h"
 #include "./grid.h"
 #include "./box.h"
+#include "./tet.h"
+#include "./quad.h"
 #include "./camera.h"
 #include "./material.h"
 #include "./bvh_builder.h"
@@ -21,6 +23,8 @@ struct SceneCounts {
     u32 meshes{0};
     u32 grids{0};
     u32 boxes{0};
+    u32 tets{0};
+    u32 quads{0};
     u32 curves{0};
 };
 
@@ -37,6 +41,8 @@ struct Scene {
     Curve *curves{nullptr};
     Grid *grids{nullptr};
     Box *boxes{nullptr};
+    Tet *tets{nullptr};
+    Quad *quads{nullptr};
     Camera *cameras{nullptr};
     Mesh *meshes{nullptr};
     Texture *textures{nullptr};
@@ -45,14 +51,55 @@ struct Scene {
     AABB *aabbs{nullptr};
     RectI *screen_bounds{nullptr};
 
-    INLINE_XPU void updateAABB(AABB &aabb, const Geometry &geo) {
-        if (geo.type == GeometryType_Mesh) {
-            aabb = meshes[geo.id].aabb;
-        } else {
-            aabb.max = geo.type == GeometryType_Tetrahedron ? (SQRT3 / 3.0f) : 1.0f;
-            aabb.min = -aabb.max;
+    void updateAABB(AABB &aabb, const Geometry &geo, u8 sphere_steps = 16) {
+        static QuadVertices quad_vertices;
+        static TetVertices tet_vertices;
+        static BoxVertices box_vertices;
+
+        BoxVertices mesh_vertices;
+
+        vec3 pos, *vertices;
+        u8 vertex_count = 0;
+        aabb.min = INFINITY;
+        aabb.max = -INFINITY;
+
+        switch (geo.type) {
+            case GeometryType_Box   : vertex_count = BOX__VERTEX_COUNT;  vertices = box_vertices.array;  break;
+            case GeometryType_Tet   : vertex_count = TET__VERTEX_COUNT;  vertices = tet_vertices.array;  break;
+            case GeometryType_Quad  : vertex_count = QUAD__VERTEX_COUNT; vertices = quad_vertices.array; break;
+            case GeometryType_Mesh  : vertex_count = BOX__VERTEX_COUNT;  vertices = mesh_vertices.array; mesh_vertices = BoxVertices{meshes[geo.id].aabb}; break;
+            case GeometryType_Sphere: {
+                vec3 center_to_orbit{1.05, 0, 0};
+                mat3 rotation{mat3::RotationAroundY(TAU / (f32)sphere_steps)};
+
+                // Transform vertices positions from local-space to world-space:
+                for (u8 i = 0; i < sphere_steps; i++) {
+                    center_to_orbit = rotation * center_to_orbit;
+
+                    pos = geo.transform.externPos(center_to_orbit);
+                    aabb.min = minimum(aabb.min, pos);
+                    aabb.max = maximum(aabb.max, pos);
+
+                    pos = geo.transform.externPos({center_to_orbit.x, center_to_orbit.z, 0.0f});
+                    aabb.min = minimum(aabb.min, pos);
+                    aabb.max = maximum(aabb.max, pos);
+
+                    pos = geo.transform.externPos({0.0f, center_to_orbit.x, center_to_orbit.z});
+                    aabb.min = minimum(aabb.min, pos);
+                    aabb.max = maximum(aabb.max, pos);
+                }
+            } break;
+            default: return;
         }
-        aabb = geo.transform.externAABB(aabb);
+
+        if (vertex_count) {
+            // Transform vertices positions from local-space to world-space:
+            for (u8 i = 0; i < vertex_count; i++) {
+                pos = geo.transform.externPos(vertices[i]);
+                aabb.min = minimum(aabb.min, pos);
+                aabb.max = maximum(aabb.max, pos);
+            }
+        }
     }
 
     INLINE_XPU void updateAABBs() {
@@ -84,6 +131,8 @@ struct Scene {
           String *mesh_files = nullptr,
           Grid *grids = nullptr,
           Box *boxes = nullptr,
+          Tet *tets = nullptr,
+          Quad *quads = nullptr,
           Curve *curves = nullptr,
           memory::MonotonicAllocator *memory_allocator = nullptr
     ) : counts{counts},
@@ -92,6 +141,8 @@ struct Scene {
         geometries{geometries},
         grids{grids},
         boxes{boxes},
+        tets{tets},
+        quads{quads},
         curves{curves},
         meshes{meshes},
         textures{textures},
@@ -108,6 +159,12 @@ struct Scene {
 
         if (counts.lights && !lights) capacity += sizeof(Material) * counts.lights;
         if (counts.materials && !materials) capacity += sizeof(Material) * counts.materials;
+        if (counts.geometries && !geometries) capacity += sizeof(Geometry) * counts.geometries;
+        if (counts.boxes && !boxes) capacity += sizeof(Box) * counts.boxes;
+        if (counts.tets && !tets) capacity += sizeof(Tet) * counts.tets;
+        if (counts.quads && !quads) capacity += sizeof(Quad) * counts.quads;
+        if (counts.curves && !curves) capacity += sizeof(Curve) * counts.curves;
+
         if (counts.textures) {
             if (!textures) capacity += sizeof(Texture) * counts.textures;
             capacity += getTotalMemoryForTextures(texture_files, counts.textures);
@@ -133,6 +190,26 @@ struct Scene {
         aabbs = (AABB*)memory_allocator->allocate(sizeof(AABB) * counts.geometries);
         screen_bounds = (RectI*)memory_allocator->allocate(sizeof(RectI) * counts.geometries);
 
+        if (counts.geometries && !geometries) {
+            geometries = (Geometry*)memory_allocator->allocate(sizeof(Geometry) * counts.geometries);
+            for (u32 i = 0; i < counts.geometries; i++) geometries[i] = Geometry{};
+        }
+        if (counts.boxes && !boxes) {
+            boxes = (Box*)memory_allocator->allocate(sizeof(Box) * counts.boxes);
+            for (u32 i = 0; i < counts.boxes; i++) boxes[i] = Box{};
+        }
+        if (counts.tets && !tets) {
+            tets = (Tet*)memory_allocator->allocate(sizeof(Tet) * counts.tets);
+            for (u32 i = 0; i < counts.tets; i++) tets[i] = Tet{};
+        }
+        if (counts.quads && !quads) {
+            quads = (Quad*)memory_allocator->allocate(sizeof(Quad) * counts.quads);
+            for (u32 i = 0; i < counts.quads; i++) quads[i] = Quad{};
+        }
+        if (counts.curves && !curves) {
+            curves = (Curve*)memory_allocator->allocate(sizeof(Curve) * counts.curves);
+            for (u32 i = 0; i < counts.curves; i++) curves[i] = Curve{};
+        }
         if (counts.lights && !lights) {
             lights = (Light*)memory_allocator->allocate(sizeof(Light) * counts.lights);
             for (u32 i = 0; i < counts.lights; i++) lights[i] = Light{};

@@ -130,6 +130,9 @@ typedef double f64;
 #define ONE_OVER_PI (1.0f/pi)
 #define ONE_OVER_TWO_PI (1.0f/TAU)
 
+#define TET_MAX (0.577350259f)
+#define TET_MIN (0.288675159f)
+
 #define COLOR_COMPONENT_TO_FLOAT 0.00392156862f
 #define FLOAT_TO_COLOR_COMPONENT 255.0f
 #define DEG_TO_RAD 0.0174533f
@@ -182,6 +185,11 @@ typedef double f64;
 #define BOX__VERTEX_COUNT 8
 #define BOX__EDGE_COUNT 12
 #define GRID__MAX_SEGMENTS 101
+
+#define TET__VERTEX_COUNT 4
+#define TET__EDGE_COUNT 6
+#define QUAD__VERTEX_COUNT 4
+#define QUAD__EDGE_COUNT 4
 
 #define CURVE_STEPS 360
 
@@ -391,7 +399,7 @@ enum GeometryType {
     GeometryType_Grid,
     GeometryType_Box,
     GeometryType_Curve,
-    GeometryType_Tetrahedron,
+    GeometryType_Tet,
     GeometryType_Quad,
     GeometryType_Sphere,
     GeometryType_Light,
@@ -1544,6 +1552,10 @@ bool loadContent(T &value, char *file_path) {
     os::closeFile(file);
     return true;
 }
+
+#ifdef COMPILER_GCC
+#include <new>
+#endif
 
 template <typename T>
 bool save(const T &value, char* file_path) {

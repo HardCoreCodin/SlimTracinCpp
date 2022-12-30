@@ -3,7 +3,7 @@
 #include "../scene/scene.h"
 #include "../viewport/viewport.h"
 
-INLINE_XPU bool computeSSB(RectI &bounds, vec3 &pos, f32 r, f32 focal_length, Dimensions &dimensions) {
+bool computeSSB(RectI &bounds, const vec3 &pos, f32 r, f32 focal_length, const Dimensions &dimensions) {
 /*
  h = y - t
  HH = zz + tt
@@ -135,28 +135,72 @@ INLINE_XPU bool computeSSB(RectI &bounds, vec3 &pos, f32 r, f32 focal_length, Di
     return false;
 }
 
-INLINE void updateScreenBounds(const Scene &scene, const Viewport &viewport) {
+void updateScreenBoundsRangeFromCoords(i32 x, i32 y, i32 X, i32 Y, RectI &bounds) {
+    bounds.left = Max(Min(bounds.left, x), 0);
+    bounds.top  = Max(Min(bounds.top,  y), 0);
+    bounds.right  = Min(Max(bounds.right,  x), X);
+    bounds.bottom = Min(Max(bounds.bottom, y), Y);
+}
+
+bool updateScreenBoundsRangeFromEdge(Edge edge, i32 X, i32 Y, const Geometry &geo, const Viewport &viewport, RectI &bounds) {
+    edge.from = viewport.camera->internPos(geo.transform.externPos(edge.from));
+    edge.to   = viewport.camera->internPos(geo.transform.externPos(edge.to));
+    Sides from_sides, to_sides;
+    viewport.checkEdge(edge, from_sides, to_sides);
+    if (viewport.cullAndClipEdge(edge)) {
+        viewport.projectEdge(edge);
+        updateScreenBoundsRangeFromCoords((i32)edge.from.x, (i32)edge.from.y, X, Y, bounds);
+        updateScreenBoundsRangeFromCoords((i32)edge.to.x, (i32)edge.to.y, X, Y, bounds);
+        return true;
+    } else {
+        if (from_sides.right || to_sides.right) bounds.right = X;
+        if (from_sides.left || to_sides.left) bounds.left = 0;
+        if (from_sides.top || to_sides.top) bounds.top = 0;
+        if (from_sides.bottom || to_sides.bottom) bounds.bottom = Y;
+
+        return !((from_sides.back && to_sides.back));
+    }
+}
+
+void updateScreenBounds(const Scene &scene, const Viewport &viewport) {
+    static QuadVertices quad_vertices;
+    static TetVertices tet_vertices;
+    static BoxVertices box_vertices;
+    static QuadEdges quad_edges;
+    static TetEdges tet_edges;
+    static BoxEdges box_edges, mesh_box_edges;
+
     Camera &camera = *viewport.camera;
-    vec3 pos;
-    f32 radius;
+    const Dimensions &dim = viewport.dimensions;
+    Edge edge, *edges;
+    u8 edge_count;
+    bool visible;
+    i32 X = (i32)(dim.width  - 1);
+    i32 Y = (i32)(dim.height - 1);
 
-    for (u32 i = 0; i < scene.counts.geometries; i++) {
-        Geometry &geo = scene.geometries[i];
-        vec3 &scale = geo.transform.scale;
-        AABB &aabb = scene.meshes[geo.id].aabb;
+    for (u32 g = 0; g < scene.counts.geometries; g++) {
+        RectI &bounds = scene.screen_bounds[g];
+        Geometry &geo = scene.geometries[g];
+        Transform &xform = geo.transform;
 
+        bounds.right = bounds.bottom = 0;
+        bounds.left = X;
+        bounds.top  = Y;
+        visible = edge_count = 0;
         switch (geo.type) {
-            case GeometryType_Quad       : radius = scale.length();         break;
-            case GeometryType_Box        : radius = scale.length();         break;
-            case GeometryType_Tetrahedron: radius = scale.maximum() * SQRT2; break;
-            case GeometryType_Sphere     : radius = scale.maximum();         break;
-            case GeometryType_Mesh       : radius = Max((scale * aabb.min).length(), (scale * aabb.max).length()); break;
+            case GeometryType_Quad  : edge_count = QUAD__EDGE_COUNT; edges = quad_edges.array; break;
+            case GeometryType_Tet   : edge_count = TET__EDGE_COUNT; edges = tet_edges.array; break;
+            case GeometryType_Box   : edge_count = BOX__EDGE_COUNT;  edges = box_edges.array; break;
+            case GeometryType_Mesh  : edge_count = BOX__EDGE_COUNT;  edges = mesh_box_edges.array; mesh_box_edges = BoxEdges{scene.meshes[geo.id].aabb}; break;
+            case GeometryType_Sphere: visible = computeSSB(bounds, camera.internPos(xform.position), xform.scale.maximum(), camera.focal_length, dim); break;
             default: continue;
         }
+        for (u8 i = 0; i < edge_count; i++) visible |= updateScreenBoundsRangeFromEdge(edges[i], X, Y, geo, viewport, bounds);
 
-        pos = camera.internPos(geo.transform.position);
-        geo.flags &= ~GEOMETRY_IS_VISIBLE;
-        if (computeSSB(scene.screen_bounds[i], pos, radius, camera.focal_length, viewport.canvas.dimensions))
+        visible &= !(bounds.right <= bounds.left || bounds.bottom <= bounds.top);
+        if (visible)
             geo.flags |= GEOMETRY_IS_VISIBLE;
+        else
+            geo.flags &= ~GEOMETRY_IS_VISIBLE;
     }
 }

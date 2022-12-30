@@ -56,7 +56,7 @@ struct ClassicShadersApp : SlimApp {
 
     Geometry floor{{{}, {}, {40, 1, 40}}, GeometryType_Quad};
     Geometry box{{{-9, 4, 3}, {0.02f, 0.04f, 0.0f}, {2.5f}}, GeometryType_Box};
-    Geometry tet{{{-3, 4, 12}, {0.02f, 0.04f, 0.06f}, {2.5f}}, GeometryType_Tetrahedron};
+    Geometry tet{{{-3, 4, 12}, {0.02f, 0.04f, 0.06f}, {2.5f}}, GeometryType_Tet};
     Geometry sphere{{{3, 4, 0}, {}, {2.5f}}, GeometryType_Sphere};
     Geometry *geometries{&floor};
 
@@ -64,7 +64,7 @@ struct ClassicShadersApp : SlimApp {
     Scene scene{counts, nullptr, geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 
-    RayTracer ray_tracer{canvas, scene, (u8)counts.geometries, scene.mesh_stack_size};
+    RayTracer ray_tracer{scene, (u8)counts.geometries, scene.mesh_stack_size};
 
     // Drawing:
     f32 opacity = 0.2f;
@@ -82,7 +82,7 @@ struct ClassicShadersApp : SlimApp {
 
         canvas.clear();
 
-        ray_tracer.render(camera);
+        ray_tracer.render(viewport);
 
         if (controls::is_pressed::alt)
             drawSelection(selection, viewport, scene);
