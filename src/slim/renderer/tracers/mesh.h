@@ -35,7 +35,7 @@ struct MeshTracer {
                 hit.uv.x = UV.x;
                 hit.uv.y = UV.y;
                 hit.id = i;
-                hit.uv_coverage_over_surface_area = triangle->area_of_uv / triangle->area_of_parallelogram;
+                hit.uv_coverage = triangle->area_of_uv / triangle->area_of_parallelogram;
 
                 found_triangle = true;
 

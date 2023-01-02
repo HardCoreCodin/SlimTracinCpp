@@ -129,7 +129,7 @@ Color shadeSurface(Ray &ray, SceneTracer &scene_tracer, LightsShader &lights_sha
                     ray.direction = shaded.reflected_direction;
             }
             if (scene_tracer.trace(ray, shaded)) {
-                shaded.reset(ray, scene.geometries, scene.materials, scene.textures, scene_tracer.pixel_area_over_focal_length_squared);
+                shaded.reset(ray, scene.geometries, scene.materials, scene.textures);
 
                 if (shaded.geometry->type == GeometryType_Quad && shaded.material->isEmissive()) {
                     color = shaded.from_behind ? Black : shaded.material->emission;

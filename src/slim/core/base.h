@@ -8,6 +8,7 @@
 #elif defined(__GNUC__) || defined(__GNUG__)
     #define COMPILER_GCC 1
     #define COMPILER_CLANG_OR_GCC 1
+    #include <new>
 #elif defined(_MSC_VER)
     #define COMPILER_MSVC 1
 #endif
@@ -1552,10 +1553,6 @@ bool loadContent(T &value, char *file_path) {
     os::closeFile(file);
     return true;
 }
-
-#ifdef COMPILER_GCC
-#include <new>
-#endif
 
 template <typename T>
 bool save(const T &value, char* file_path) {

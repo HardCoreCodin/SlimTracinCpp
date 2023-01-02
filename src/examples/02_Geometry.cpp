@@ -87,7 +87,7 @@ struct GeometryApp : SlimApp {
     HUD hud{hud_settings, &FPS_hud_line};
 
     GeometryApp() {
-        floor.material_id = (u32)(&floor_material - materials);
+        floor.material_id = sphere.material_id = box.material_id = tet.material_id = (u32)(&floor_material - materials);
         floor_material.texture_count = 2;
         floor_material.texture_ids[0] = 0;
         floor_material.texture_ids[1] = 1;

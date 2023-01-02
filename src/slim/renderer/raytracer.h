@@ -119,9 +119,7 @@ struct RayTracer {
         Camera &camera = *viewport.camera;
         Scene &scene = scene_tracer.scene;
 
-        f32 hw = viewport.dimensions.h_width;
-        f32 fl = camera.focal_length;
-        scene_tracer.pixel_area_over_focal_length_squared = 1.0f / (hw * hw * hw * fl * fl);
+        scene_tracer.pixel_height_over_focal_length = (2.0f / viewport.canvas.dimensions.f_height) / camera.focal_length;
         inverted_camera_rotation = camera.rotation.inverted();
         camera_position = camera.position;
 
@@ -140,13 +138,11 @@ private:
         shaded.reset(ray,
                      scene_tracer.scene.geometries,
                      scene_tracer.scene.materials,
-                     mode == RenderMode_Beauty ?
-                     scene_tracer.scene.textures : nullptr,
-                     scene_tracer.pixel_area_over_focal_length_squared);
+                     mode == RenderMode_Beauty ? scene_tracer.scene.textures : nullptr);
         switch (mode) {
             case RenderMode_UVs      : return shaded.getColorByUV();
             case RenderMode_Depth    : return shaded.getColorByDistance();
-            case RenderMode_MipLevel : return shaded.getColorByMipLevel(scene_tracer.scene.textures[0]);
+            case RenderMode_MipLevel : return shaded.material->isTextured() ? shaded.getColorByMipLevel(scene_tracer.scene.textures[0]) : Grey;
             case RenderMode_Normals  : return directionToColor(shaded.normal);
             case RenderMode_NormalMap: return directionToColor(shaded.sampleNormal(scene_tracer.scene.textures));
             default:
@@ -163,11 +159,14 @@ private:
         bool hit_light_only = false;
         Geometry *hit_geo = use_ssb ? scene_tracer.hitGeometries(ray, shaded, x, y) : scene_tracer.trace(ray, shaded);
         if (hit_geo) {
+            float ray_direction_length = ray.direction.length();
+            shaded.distance *= ray_direction_length;
+            ray.direction /= ray_direction_length;
             scene_tracer.finalizeHitFromGeo(ray, shaded, hit_geo);
             depth = (inverted_camera_rotation * (shaded.position - camera_position)).z;
             color = shade(ray);
         } else if (mode == RenderMode_Beauty && scene_tracer.scene.lights) {
-            hit_light_only = lights_shader.shadeLights(Ro, Rd, shaded.distance, color);
+            hit_light_only = lights_shader.shadeLights(Ro, Rd.normalized(), shaded.distance, color);
             if (hit_light_only)
                 depth = INFINITY;
         }
@@ -179,12 +178,12 @@ private:
     }
 
     void renderOnCPU(const Canvas &canvas, const Camera &camera) {
-        f32 normalization_factor = (canvas.antialias == SSAA ? 1.0f : 2.0f) / canvas.dimensions.f_height;
-
-        vec3 start = camera.getTopLeftCornerOfProjectionPlane(canvas.dimensions.width_over_height);
-        vec3 right = camera.right * normalization_factor;
-        vec3 down  = camera.up * -normalization_factor;
-        vec3 current;
+        f32 left_of_center = canvas.antialias == SSAA ? -canvas.dimensions.f_width : -canvas.dimensions.h_width;
+        f32 up_of_center   = canvas.antialias == SSAA ? canvas.dimensions.f_height : canvas.dimensions.h_height;
+        vec3 start = camera.forward.scaleAdd(camera.focal_length * up_of_center,
+                                             camera.right.scaleAdd(
+                                                     left_of_center, camera.up * up_of_center));
+        vec3 current = start;
 
         Color color{Black};
         Ray ray;
@@ -194,16 +193,17 @@ private:
         u16 height = canvas.dimensions.height * (canvas.antialias == SSAA ? 2 : 1);
         Pixel *pixel = canvas.pixels;
         for (u16 y = 0; y < height; y++) {
-            current = start;
             for (u16 x = 0; x < width; x++, pixel++) {
                 ray.origin = camera.position;
-                ray.direction = current.normalized();
-
+                ray.direction = current;
+//                ray.dx_point = current + camera.right;
+//                ray.dy_point = current + camera.up;
                 renderPixel(canvas, ray, x, y, color);
 
-                current += right;
+                current += camera.right;
             }
-            start += down;
+            start -= camera.up;
+            current = start;
         }
     }
 

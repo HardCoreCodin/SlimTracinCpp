@@ -6,7 +6,7 @@
 struct RayHit {
     vec3 position, normal;
     UV uv;
-    f32 distance, uv_coverage_over_surface_area;
+    f32 distance, uv_coverage;
     u32 id;
     bool from_behind = false;
 
@@ -16,7 +16,7 @@ struct RayHit {
 };
 
 struct Ray {
-    vec3 origin, scaled_origin, direction, direction_reciprocal;
+    vec3 origin, scaled_origin, direction, direction_reciprocal;//, dx_point, dy_point;
     Sides faces;
     OctantShifts octant_shifts;
 
@@ -96,7 +96,7 @@ struct Ray {
         hit.distance = t;
         hit.normal.x = hit.normal.z = 0.0f;
         hit.normal.y = 1.0f;
-        hit.uv_coverage_over_surface_area = 0.25f;
+        hit.uv_coverage = 0.25f;
 
         return true;
     }
@@ -150,7 +150,8 @@ struct Ray {
         hit.normal.y = (f32)((i32)(side == BoxSide_Top) - (i32)(side == BoxSide_Bottom));
         hit.normal.z = (f32)((i32)(side == BoxSide_Front) - (i32)(side == BoxSide_Back));
         if (hit.from_behind) hit.normal = -hit.normal;
-        hit.uv_coverage_over_surface_area = 0.25f;
+
+        hit.uv_coverage = 0.25f;
 
         return side;
     }
@@ -187,7 +188,7 @@ struct Ray {
         }
 
         hit.distance = t;
-        hit.uv_coverage_over_surface_area = UNIT_SPHERE_AREA_OVER_SIX;
+        hit.uv_coverage = 1.0f / UNIT_SPHERE_AREA_OVER_SIX;
 
         return true;
     }
@@ -199,7 +200,7 @@ struct Ray {
         bool found_triangle = false;
 
         RayHit current_hit;
-        current_hit.uv_coverage_over_surface_area = 4.0f / SQRT3;
+        current_hit.uv_coverage = 4.0f / SQRT3;
 
         for (u8 t = 0; t < 4; t++) {
             tangent_pos = face_normal = vec3{t == 3 ? TET_MAX : -TET_MAX};

@@ -7,9 +7,10 @@ struct SceneTracer {
     MeshTracer mesh_tracer{nullptr, 0};
     u32 stack_size = 0;
     u32 *stack = nullptr;
-    Ray local_ray, shadow_ray;
+    Ray local_ray, shadow_ray;//, hit_ray;
     RayHit local_hit, shadow_hit;
-    f32 pixel_area_over_focal_length_squared;
+    vec3 hit_ray_direction;
+    f32 pixel_height_over_focal_length;
     bool scene_has_emissive_quads = false;
 
     INLINE_XPU SceneTracer(Scene &scene, u32 *stack, u32 stack_size, u32 *mesh_stack, u32 mesh_stack_size) :
@@ -132,11 +133,11 @@ struct SceneTracer {
         }
 
         switch (geo.type) {
-            case GeometryType_Quad       : return local_ray.hitsDefaultQuad(local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
-            case GeometryType_Box        : return local_ray.hitsDefaultBox(local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
-            case GeometryType_Sphere     : return local_ray.hitsDefaultSphere(local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
-            case GeometryType_Tet: return local_ray.hitsDefaultTetrahedron(local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
-            case GeometryType_Mesh       : return mesh_tracer.trace(scene.meshes[geo.id], local_ray, local_hit, any_hit);
+            case GeometryType_Quad  : return local_ray.hitsDefaultQuad(       local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
+            case GeometryType_Box   : return local_ray.hitsDefaultBox(        local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
+            case GeometryType_Sphere: return local_ray.hitsDefaultSphere(     local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
+            case GeometryType_Tet   : return local_ray.hitsDefaultTetrahedron(local_hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
+            case GeometryType_Mesh  : return mesh_tracer.trace(scene.meshes[geo.id], local_ray, local_hit, any_hit);
             default: return false;
         }
     }
@@ -160,6 +161,7 @@ struct SceneTracer {
                 hitGeometry(geo, ray) &&
                 local_hit.distance < hit.distance) {
                 hit = local_hit;
+                hit_ray_direction = local_ray.direction;
                 hit_geo = &geo;
             }
         }
@@ -198,6 +200,7 @@ struct SceneTracer {
 
                 if (local_hit.distance < hit.distance) {
                     hit = local_hit;
+                    hit_ray_direction = local_ray.direction;
                     hit_geo = geo;
                 }
             }
@@ -235,9 +238,69 @@ struct SceneTracer {
             }
         }
 
+        if (scene.textures && scene.materials[hit_geo->material_id].isTextured()) {
+            f32 cone_width = pixel_height_over_focal_length * (hit.distance * hit.distance);
+            f32 projected_cone_width = cone_width / -(hit.normal.dot(hit_ray_direction));
+            hit.uv_coverage *= cone_width * projected_cone_width / hit_ray_direction.squaredLength();
+        }
+
+//        hit.position = ray[hit.distance];
+//        hit.normal = hit_geo->transform.externDir(hit.normal);
+//        hit_ray = ray;
+//        if (scene.textures && scene.materials[hit_geo->material_id].isTextured()) {
+//            hit_ray.dx_point = ray.dx_point;
+//            hit_ray.dy_point = ray.dy_point;
+//
+//            hit_ray.direction = hit_ray.dx_point - hit_ray.origin;
+//            local_hit.distance = INFINITY;
+//            hit_ray.hitsPlane(hit.position, hit.normal, local_hit);
+//            f32 cone_width = (local_hit.position - hit.position).length();
+//            cone_width *= cone_width;
+//            hit.uv_coverage *= cone_width;// / abs(hit.normal.dot(hit_ray.direction.normalized()));
+
+
+//        if (scene.textures && scene.materials[hit_geo->material_id].isTextured()) {
+//            hit_ray.dx_point = hit_geo->transform.internPos(ray.dx_point);
+//            hit_ray.dy_point = hit_geo->transform.internPos(ray.dy_point);
+//            if (hit_geo->type == GeometryType_Sphere) {
+//                int i = 0;
+//            }
+//            hit_ray.direction = hit_ray.dx_point - hit_ray.origin;
+//            local_hit.distance = INFINITY;
+//            if (!hit_ray.hitsPlane(hit.position, hit.normal, local_hit)) {
+//                hit_ray.hitsPlane(hit.position, hit.normal, local_hit);
+//            }
+//            vec3 U = local_hit.position - hit.position;
+//
+//            local_hit.distance = INFINITY;
+//            hit_ray.direction = hit_ray.dy_point - hit_ray.origin;
+//            hit_ray.hitsPlane(hit.position, hit.normal, local_hit);
+//            vec3 V = local_hit.position - hit.position;
+//
+//            quat rotation = quat::RotationBetweenNormalized(vec3::Z, hit.normal);
+//
+//            U = rotation * U;
+//            V = rotation * V;
+//
+//            hit_ray.origin -= hit.position;
+//            hit_ray.dx_point = hit_geo->transform.internPos(ray.dx_point) - hit.position;
+//            hit_ray.dy_point = hit_geo->transform.internPos(ray.dy_point) - hit.position;
+//
+//            f32 NdotRoP = -(hit.normal.dot(hit_ray.origin));
+//            hit_ray.direction = hit_ray.dx_point - hit_ray.origin;
+//            vec3 U = rotation * hit_ray[NdotRoP / hit.normal.dot(hit_ray.direction)];
+//
+//            hit_ray.direction = hit_ray.dy_point - hit_ray.origin;
+//            vec3 V = rotation * hit_ray[NdotRoP / hit.normal.dot(hit_ray.direction)];
+//
+
+//            hit.uv_coverage *= abs(U.z*V.x - U.x*V.z) / abs(hit.normal.dot(ray.direction.normalized()));
+//        }
+
         hit.position = ray[hit.distance];
         hit.normal = hit_geo->transform.externDir(hit.normal);
         hit.id = (u32)(hit_geo - scene.geometries);
+
 //        if (hit.from_behind) {
 //            hit.normal = -hit.normal;
 //            hit.position = hit.normal.scaleAdd(-TRACE_OFFSET*2, hit.position);

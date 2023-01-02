@@ -81,6 +81,7 @@ struct quat {
         }.normalized();
     }
 
+    static INLINE_XPU quat RotationBetweenNormalized(const vec3 &from, const vec3 to)  { return quat{from.cross(to), from.dot(to)}.normalized(); }
     static INLINE_XPU quat RotationAroundX(f32 radians) { return AxisAngle(vec3{1.0f, 0.0f, 0.0f}, radians); }
     static INLINE_XPU quat RotationAroundY(f32 radians) { return AxisAngle(vec3{0.0f, 1.0f, 0.0f}, radians); }
     static INLINE_XPU quat RotationAroundZ(f32 radians) { return AxisAngle(vec3{0.0f, 0.0f, 1.0f}, radians); }

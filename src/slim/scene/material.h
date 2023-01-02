@@ -132,14 +132,9 @@ static ColorID MIP_LEVEL_COLORS[9] = {
 struct Shaded : RayHit {
     Color albedo = White;
     vec3 viewing_direction, viewing_origin, reflected_direction, light_direction, emissive_quad_vertices[4];
-    f32 light_distance, light_distance_squared, uv_coverage, NdotL, NdotV, R0, IOR, IOR2 = 1.0;
+    f32 light_distance, light_distance_squared, NdotL, NdotV, R0, IOR, IOR2 = 1.0;
     Material *material = nullptr;
     Geometry *geometry = nullptr;
-
-    INLINE_XPU void updateUVCoverage(f32 pixel_area_over_focal_length_squared) {
-        uv_coverage = uv_coverage_over_surface_area * pixel_area_over_focal_length_squared * distance;
-        uv_coverage /= NdotV;
-    };
 
     INLINE_XPU void updateUV(UV uv_repeat) {
         uv *= uv_repeat;
@@ -195,7 +190,7 @@ struct Shaded : RayHit {
         return NdotL > 0.0f;
     }
 
-    INLINE_XPU void reset(Ray &ray, Geometry *geometries, Material *materials, Texture *textures = nullptr, f32 pixel_area_over_focal_length_squared = 0) {
+    INLINE_XPU void reset(Ray &ray, Geometry *geometries, Material *materials, Texture *textures = nullptr) {
         viewing_origin    = ray.origin;
         viewing_direction = ray.direction;
         geometry = geometries + id;
@@ -211,10 +206,10 @@ struct Shaded : RayHit {
             normal = -normal;
             NdotV = -NdotV;
             IOR = material->n2_over_n1;
+            uv_coverage = -uv_coverage;
         }
         reflected_direction = reflect(viewing_direction, normal, NdotV);
         if (textures && material->isTextured()) {
-            updateUVCoverage(pixel_area_over_focal_length_squared);
             updateUV();
             if (material->hasAlbedoMap()) applyAlbedoMap(textures);
             if (material->hasNormalMap()) applyNormalMap(textures);
