@@ -12,18 +12,12 @@
 struct ClassicShadersApp : SlimApp {
     // Viewport:
     Camera camera{
+//            {-4, 15, -17},
             {0, 7, -11},
             {-25 * DEG_TO_RAD, 0, 0}
     }, *cameras{&camera};
     Canvas canvas;
     Viewport viewport{canvas,&camera};
-
-    // HUD:
-    HUDLine shader_line{(char*)"Shader : "};
-    HUDLine roughness_line{(char*)"Roughness : "};
-    HUDLine shininess_line{(char*)"Shininess : "};
-    HUDSettings hud_settings{3};
-    HUD hud{hud_settings, &shader_line};
 
     // Scene:
     Light key_light{ {10, 10, -5}, {1.0f, 1.0f, 0.65f}, 1.1f * 40.0f};
@@ -38,10 +32,9 @@ struct ClassicShadersApp : SlimApp {
         MATERIAL_COUNT
     };
 
-    Material lambert_material{BRDF_Lambert, 0.5f, 0.0f, 0, 0, {0.8f, 1.0f, 0.8f}};
+    Material lambert_material{BRDF_Lambert, 1.0f, 0.0f, 0, 0, {0.8f, 1.0f, 0.8f}};
     Material phong_material{BRDF_Phong, 0.5f, 0.0f, 0, 0, {0.2f, 0.2f, 0.3f}, {1.0f, 1.0f, 0.4f}};
     Material blinn_material{BRDF_Blinn, 0.5f, 0.0f, 0, 0, {1.0f, 0.3f, 1.0f}, {1.0f, 0.4f, 1.0f}};
-    Material floor_material{BRDF_CookTorrance, 0.5f, 0.0f, MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
     Material *materials{&lambert_material};
 
     char string_buffers[2][200];
@@ -50,18 +43,14 @@ struct ClassicShadersApp : SlimApp {
             String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
     };
 
-    Texture floor_albedo_map;
-    Texture floor_normal_map;
-    Texture *textures = &floor_albedo_map;
-
-    Geometry floor{{{}, {}, {40, 1, 40}}, GeometryType_Quad};
-    Geometry box{{{-9, 4, 3}, {0.02f, 0.04f, 0.0f}, {2.5f}}, GeometryType_Box};
-    Geometry tet{{{-3, 4, 12}, {0.02f, 0.04f, 0.06f}, {2.5f}}, GeometryType_Tet};
-    Geometry sphere{{{3, 4, 0}, {}, {2.5f}}, GeometryType_Sphere};
+    Geometry floor{{{}, {}, {40, 1, 40}}, GeometryType_Quad, MATERIAL_LAMBERT};
+    Geometry box{{{-9, 5, 3}, {0.02f, 0.04f, 0.0f}, {2.5f}}, GeometryType_Box, MATERIAL_PHONG};
+    Geometry tet{{{-3, 4, 12}, {0.02f, 0.04f, 0.06f}, {2.5f}}, GeometryType_Tet, MATERIAL_PHONG};
+    Geometry sphere{{{3, 4, 0}, {}, {2.5f}}, GeometryType_Sphere, MATERIAL_BLINN};
     Geometry *geometries{&floor};
 
-    SceneCounts counts{4, 1, 3, 2, 2};
-    Scene scene{counts, nullptr, geometries, cameras, lights, materials, textures, texture_files};
+    SceneCounts counts{4, 1, 3, MATERIAL_COUNT};
+    Scene scene{counts, nullptr, geometries, cameras, lights, materials, nullptr, texture_files};
     Selection selection;
 
     RayTracer ray_tracer{scene, (u8)counts.geometries, scene.mesh_stack_size};
@@ -70,15 +59,34 @@ struct ClassicShadersApp : SlimApp {
     f32 opacity = 0.2f;
     quat rotation{tet.transform.rotation};
 
+
+
+    bool antialias = false;
+
+    // HUD:
+    HUDLine FPS_hud_line{(char*)"FPS : "};
+    HUDLine GPU_hud_line{(char*)"GPU : ",
+                         (char*)"On",
+                         (char*)"Off",
+                         &ray_tracer.use_gpu,
+                         true};
+    HUDLine AA_hud_line{(char*)"SSAA: ",
+                        (char*)"On",
+                        (char*)"Off",
+                        &antialias,
+                        true};
+    HUDLine shader_line{(char*)"Shader : "};
+    HUDLine roughness_line{(char*)"Roughness : "};
+    HUDSettings hud_settings{5};
+    HUD hud{hud_settings, &FPS_hud_line};
+
     ClassicShadersApp() {
-        floor.material_id = &floor_material - materials;
-        floor_material.texture_count = 2;
-        floor_material.texture_ids[0] = 0;
-        floor_material.texture_ids[1] = 1;
+        updateSelectionInHUD();
     }
 
     void OnRender() override {
         static Transform transform;
+        FPS_hud_line.value = (i32)render_timer.average_frames_per_second;
 
         canvas.clear();
 
@@ -94,19 +102,20 @@ struct ClassicShadersApp : SlimApp {
     }
 
     void OnUpdate(f32 delta_time) override {
-        if (!mouse::is_captured) selection.manipulate(viewport, scene);
         if (!controls::is_pressed::alt) viewport.updateNavigation(delta_time);
+        if (!mouse::is_captured) selection.manipulate(viewport, scene);
+        if (selection.changed) {
+            selection.changed = false;
+            updateSelectionInHUD();
+        }
 
-        quat rot = quat{rotation.axis, rotation.amount / delta_time};
-        for (u8 i = &box - geometries; i < 4; i++) {
+        quat rot = quat::AxisAngle(rotation.axis, delta_time * 10.0f);
+        for (u8 i = 0; i < scene.counts.geometries; i++) {
             Geometry &geo = geometries[i];
 
-            if (!(controls::is_pressed::alt && &geo == selection.geometry))
+            if (geo.type != GeometryType_Quad && !(controls::is_pressed::alt && &geo == selection.geometry))
                 geo.transform.rotation = (geo.transform.rotation * rot).normalized();
         }
-        scene.updateBVH();
-
-//        uploadPrimitives(scene);
     }
 
     void OnKeyChanged(u8 key, bool is_pressed) override {
@@ -122,6 +131,9 @@ struct ClassicShadersApp : SlimApp {
         if (key == 'D') move.right    = is_pressed;
 
         if (is_pressed) {
+            if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
+            if (key == 'G') ray_tracer.use_gpu = !ray_tracer.use_gpu;
+            if (key == 'Z') { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
             if ((key == 'Z' || key == 'X') && selection.geometry) {
                 char inc = key == 'X' ? 1 : -1;
                 if (controls::is_pressed::ctrl) {
@@ -130,23 +142,24 @@ struct ClassicShadersApp : SlimApp {
 //                    uploadMaterials(scene);
                 } else {
                     selection.geometry->material_id = (selection.geometry->material_id + inc + MATERIAL_COUNT) % MATERIAL_COUNT;
-//                    uploadPrimitives(scene);
                 }
-                char* shader = (char*)"";
-                if (selection.geometry) {
-                    switch (selection.geometry->material_id) {
-                        case MATERIAL_BLINN: shader = (char*)"Blinn"; break;
-                        case MATERIAL_PHONG: shader = (char*)"Phong"; break;
-                        default:             shader = (char*)"Lambert"; break;
-                    }
-                    roughness_line.value = materials[selection.geometry->material_id].roughness;
-                } else
-                    roughness_line.value.string.copyFrom((char*)"", 0);
-
-                roughness_line.value.string.copyFrom(shader, 0);
+                updateSelectionInHUD();
             }
-        } else if (key == controls::key_map::tab)
-            hud.enabled = !hud.enabled;
+        }
+    }
+    void updateSelectionInHUD() {
+        char* shader = (char*)"";
+        if (selection.geometry) {
+            switch (selection.geometry->material_id) {
+                case MATERIAL_BLINN: shader = (char*)"Blinn"; break;
+                case MATERIAL_PHONG: shader = (char*)"Phong"; break;
+                default:             shader = (char*)"Lambert"; break;
+            }
+            roughness_line.value = materials[selection.geometry->material_id].roughness;
+        } else
+            roughness_line.value.string.copyFrom((char*)"", 0);
+
+        shader_line.value.string.copyFrom(shader, 0);
     }
     void OnWindowResize(u16 width, u16 height) override {
         viewport.updateDimensions(width, height);

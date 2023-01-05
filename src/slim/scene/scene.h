@@ -51,7 +51,7 @@ struct Scene {
     AABB *aabbs{nullptr};
     RectI *screen_bounds{nullptr};
 
-    void updateAABB(AABB &aabb, const Geometry &geo, u8 sphere_steps = 16) {
+    void updateAABB(AABB &aabb, const Geometry &geo, u8 sphere_steps = 36) {
         static QuadVertices quad_vertices;
         static TetVertices tet_vertices;
         static BoxVertices box_vertices;
@@ -69,7 +69,7 @@ struct Scene {
             case GeometryType_Quad  : vertex_count = QUAD__VERTEX_COUNT; vertices = quad_vertices.array; break;
             case GeometryType_Mesh  : vertex_count = BOX__VERTEX_COUNT;  vertices = mesh_vertices.array; mesh_vertices = BoxVertices{meshes[geo.id].aabb}; break;
             case GeometryType_Sphere: {
-                vec3 center_to_orbit{1.05f, 0.0f, 0.0f};
+                vec3 center_to_orbit{2.0f, 0.0f, 0.0f};
                 mat3 rotation{mat3::RotationAroundY(TAU / (f32)sphere_steps)};
 
                 // Transform vertices positions from local-space to world-space:
@@ -275,9 +275,7 @@ struct Scene {
             if (geo.type == GeometryType_Mesh)
                 xform.scale *= meshes[geo.id].aabb.max;
 
-            xform.internPosAndDir(ray.origin, ray.direction, local_ray.origin, local_ray.direction);
-            local_ray.direction_reciprocal = 1.0f / local_ray.direction;
-            local_ray.prePrepRay();
+            local_ray.localize(ray, xform);
             if (local_ray.hitsDefaultBox(local_hit)) {
                 hit = local_hit;
                 *hit_geo = geometries + i;
@@ -296,9 +294,7 @@ struct Scene {
                 xform.scale = light_radius;
                 xform.rotation = {};
 
-                xform.internPosAndDir(ray.origin, ray.direction, local_ray.origin, local_ray.direction);
-                local_ray.direction_reciprocal = 1.0f / local_ray.direction;
-                local_ray.prePrepRay();
+                local_ray.localize(ray, xform);
                 if (local_ray.hitsDefaultSphere(local_hit)) {
                     hit = local_hit;
                     *hit_geo = nullptr;

@@ -1,6 +1,7 @@
 #include "../slim/scene/selection.h"
 #include "../slim/draw/hud.h"
 #include "../slim/draw/bvh.h"
+#include "../slim/draw/ssb.h"
 #include "../slim/draw/scene.h"
 #include "../slim/draw/selection.h"
 #include "../slim/renderer/raytracer.h"
@@ -128,8 +129,6 @@ struct GeometryApp : SlimApp {
             if (geo.type != GeometryType_Quad && !(controls::is_pressed::alt && &geo == selection.geometry))
                 geo.transform.rotation = (geo.transform.rotation * rot).normalized();
         }
-
-//        uploadPrimitives(scene);
     }
 
     void OnKeyChanged(u8 key, bool is_pressed) override {

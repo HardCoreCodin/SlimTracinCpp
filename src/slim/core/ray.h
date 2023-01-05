@@ -2,34 +2,48 @@
 
 #include "../math/vec2.h"
 #include "../math/vec3.h"
+#include "../math/mat3.h"
+#include "../math/quat.h"
+#include "./transform.h"
+
 
 struct RayHit {
     vec3 position, normal;
     UV uv;
-    f32 distance, uv_coverage;
+    f32 distance, uv_coverage, cone_width, cone_width_scaling_factor = 1.0f;
     u32 id;
     bool from_behind = false;
-
-    INLINE_XPU void updateUV(UV uv_repeat) {
-        uv *= uv_repeat;
-    };
 };
 
 struct Ray {
-    vec3 origin, scaled_origin, direction, direction_reciprocal;//, dx_point, dy_point;
+    vec3 origin, scaled_origin, direction, direction_reciprocal;
+    vec2i pixel_coords;
     Sides faces;
     OctantShifts octant_shifts;
+    u8 depth;
 
     INLINE_XPU vec3 at(f32 t) const { return direction.scaleAdd(t, origin); }
     INLINE_XPU vec3 operator [](f32 t) const { return at(t); }
 
-    INLINE_XPU void prePrepRay() {
-        faces = direction.facing();
-        octant_shifts = faces;
-        scaled_origin = -origin * direction_reciprocal;
+    INLINE_XPU void localize(const Ray &ray, const Transform &transform) {
+        vec3 inv_scale = 1.0f / transform.scale;
+        quat inv_rotation = transform.rotation.conjugate();
+        reset(inv_scale * (inv_rotation * (ray.origin - transform.position)),
+              inv_scale * (inv_rotation * ray.direction));
     }
 
-    INLINE_XPU bool hitsAABB(const AABB &aabb, f32 &distance) {
+    INLINE_XPU void reset(const vec3 &new_origin, const vec3 &new_direction) {
+        origin = new_origin;
+        direction = new_direction;
+
+        direction_reciprocal = 1.0f / direction;
+        scaled_origin = -origin * direction_reciprocal;
+
+        faces = direction.facing();
+        octant_shifts = faces;
+    }
+
+    INLINE_XPU bool hitsAABB(const AABB &aabb, f32 &distance) const {
         vec3 min_t{*(&aabb.min.x + octant_shifts.x), *(&aabb.min.y + octant_shifts.y), *(&aabb.min.z + octant_shifts.z)};
         vec3 max_t{*(&aabb.max.x - octant_shifts.x), *(&aabb.max.y - octant_shifts.y), *(&aabb.max.z - octant_shifts.z)};
         min_t = min_t.mulAdd(direction_reciprocal, scaled_origin);
@@ -38,7 +52,7 @@ struct Ray {
         return distance <= max_t.minimum();
     }
 
-    INLINE_XPU bool hitsPlane(const vec3 &plane_origin, const vec3 &plane_normal, RayHit &hit) {
+    INLINE_XPU bool hitsPlane(const vec3 &plane_origin, const vec3 &plane_normal, RayHit &hit) const {
         f32 NdotRd = plane_normal.dot(direction);
         if (NdotRd == 0) // The ray is parallel to the plane
             return false;
@@ -63,7 +77,7 @@ struct Ray {
         return true;
     }
 
-    INLINE_XPU bool hitsDefaultQuad(RayHit &hit, bool is_transparent = false) {
+    INLINE_XPU bool hitsDefaultQuad(RayHit &hit, bool is_transparent = false) const {
         if (direction.y == 0) // The ray is parallel to the plane
             return false;
 
@@ -101,7 +115,10 @@ struct Ray {
         return true;
     }
 
-    INLINE_XPU BoxSide hitsDefaultBox(RayHit &hit, bool is_transparent = false) {
+    INLINE_XPU BoxSide hitsDefaultBox(RayHit &hit, bool is_transparent = false) const {
+        if (pixel_coords.x == 300 && pixel_coords.y == 200 && depth == 2)  {
+            int a = pixel_coords.x;
+        }
         vec3 signed_rcp{faces};
         signed_rcp *= direction_reciprocal;
         vec3 near_t{scaled_origin - signed_rcp};
@@ -124,7 +141,7 @@ struct Ray {
                 return BoxSide_None;
 
             t = far_hit_t;
-            side = octant_shifts.getBoxSide(far_axis);
+            side = OctantShifts{faces.flipped()}.getBoxSide(far_axis);
         } else
             side = octant_shifts.getBoxSide(near_axis);
 
@@ -135,7 +152,7 @@ struct Ray {
             if (hit.from_behind || far_hit_t > hit.distance)
                 return BoxSide_None;
 
-            side = octant_shifts.getBoxSide(far_axis);
+            side = OctantShifts{faces.flipped()}.getBoxSide(far_axis);;
             hit.from_behind = true;
             t = far_hit_t;
             hit.position = at(t);
@@ -149,26 +166,25 @@ struct Ray {
         hit.normal.x = (f32)((i32)(side == BoxSide_Right) - (i32)(side == BoxSide_Left));
         hit.normal.y = (f32)((i32)(side == BoxSide_Top) - (i32)(side == BoxSide_Bottom));
         hit.normal.z = (f32)((i32)(side == BoxSide_Front) - (i32)(side == BoxSide_Back));
-        if (hit.from_behind) hit.normal = -hit.normal;
+//        if (hit.from_behind) hit.normal = -hit.normal;
 
         hit.uv_coverage = 0.25f;
 
         return side;
     }
 
-    INLINE_XPU bool hitsDefaultSphere(RayHit &hit, bool is_transparent = false) {
-        f32 b = -(direction.dot(origin));
-        f32 a = direction.squaredLength();
-        f32 c = 1.0f - origin.squaredLength();
-        f32 d = b*b + a*c;
-        if (d < 0)
+    INLINE bool hitsDefaultSphere(RayHit &hit, bool is_transparent = false) const {
+        f32 t_to_closest = -(origin.dot(direction));
+        if (t_to_closest <= 0) // Ray is aiming away from the sphere
             return false;
 
-        a = 1.0f / a;
-        b *= a;
-        f32 delta = sqrtf(d) * a;
+        f32 direction_squared_length = direction.squaredLength();
+        f32 delta_squared = t_to_closest*t_to_closest + (1 - origin.squaredLength()) * direction_squared_length;
+        if (delta_squared <= 0) // Ray missed the sphere
+            return false;
 
-        f32 t = b - delta;
+        f32 delta = sqrtf(delta_squared);
+        f32 t = (t_to_closest - delta) / direction_squared_length;
         if (t > hit.distance)
             return false;
 
@@ -177,7 +193,7 @@ struct Ray {
 
         hit.from_behind = t <= 0 || (is_transparent && hit.uv.onCheckerboard());
         if (hit.from_behind) {
-            t = b + delta;
+            t = (t_to_closest + delta) / direction_squared_length;
             if (t <= 0 || t > hit.distance)
                 return false;
 
@@ -193,7 +209,7 @@ struct Ray {
         return true;
     }
 
-    INLINE_XPU bool hitsDefaultTetrahedron(RayHit &hit, bool is_transparent = false) {
+    INLINE_XPU bool hitsDefaultTetrahedron(RayHit &hit, bool is_transparent = false) const {
         mat3 tangent_matrix;
         vec3 tangent_pos;
         vec3 face_normal;

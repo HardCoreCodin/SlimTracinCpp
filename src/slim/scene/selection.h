@@ -85,9 +85,7 @@ struct Selection {
                         xform.rotation = {};
                     }
 
-                    xform.internPosAndDir(ray.origin, ray.direction, local_ray.origin, local_ray.direction);
-                    local_ray.direction_reciprocal = 1.0f / local_ray.direction;
-                    local_ray.prePrepRay();
+                    local_ray.localize(ray, xform);
                     box_side = local_ray.hitsDefaultBox(local_ray_hit);
                     if (box_side) {
                         transformation_plane_center = xform.externPos(local_ray_hit.normal);
@@ -101,8 +99,7 @@ struct Selection {
                 }
 
                 if (any_mouse_button_is_pressed && box_side) {
-                    ray.direction_reciprocal = 1.0f / ray.direction;
-                    ray.prePrepRay();
+                    ray.reset(ray.origin, ray.direction);
                     if (ray.hitsPlane(transformation_plane_origin, transformation_plane_normal, hit)) {
                         if (geometry) {
                             xform = geometry->transform;

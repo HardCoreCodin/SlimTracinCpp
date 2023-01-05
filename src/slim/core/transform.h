@@ -15,17 +15,10 @@ struct Transform : OrientationUsingQuaternion {
                     orientation.z
             }, position{position}, scale{scale} {}
 
-    INLINE_XPU void externPosAndDir(const vec3 &pos, const vec3 &dir, vec3 &out_pos, vec3 &out_dir) const {
-        out_pos = position + (rotation * (scale * position));
-        out_dir = rotation * (scale * dir);
-    }
-
-    INLINE_XPU void internPosAndDir(const vec3 &pos, const vec3 &dir, vec3 &out_pos, vec3 &out_dir) const {
-        vec3 inv_scale = 1.0f / scale;
-        quat inv_rotation = rotation.conjugate();
-        out_pos = inv_scale * (inv_rotation * (pos - position));
-        out_dir = inv_scale * (inv_rotation * dir);
-    }
+//    INLINE_XPU void externPosAndDir(const vec3 &pos, const vec3 &dir, vec3 &out_pos, vec3 &out_dir) const {
+//        out_pos = position + (rotation * (scale * position));
+//        out_dir = rotation * (scale * dir);
+//    }
 
     INLINE_XPU vec3 externPos(const vec3 &pos) const { return _translate(_rotate(_scale(pos))); }
     INLINE_XPU vec3 internPos(const vec3 &pos) const { return _unscale(_unrotate(_untranslate(pos))); }
@@ -78,9 +71,11 @@ private:
 
 struct Geometry {
     Transform transform;
-    enum GeometryType type{GeometryType_None};
-    enum ColorID color{White};
-    u32 id = 0;
-    u32 material_id = 0;
-    u8 flags = GEOMETRY_IS_VISIBLE | GEOMETRY_IS_SHADOWING;
+    GeometryType type;
+    ColorID color;
+    u32 material_id, id;
+    u8 flags;
+
+    INLINE_XPU Geometry(const Transform &transform = {}, GeometryType type = GeometryType_None, u32 material_id = 0, u8 flags = GEOMETRY_IS_VISIBLE | GEOMETRY_IS_SHADOWING) :
+        transform{transform}, type{type}, color{White}, id{0}, material_id{material_id}, flags{flags} {}
 };

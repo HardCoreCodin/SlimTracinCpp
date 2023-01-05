@@ -432,7 +432,7 @@ struct Sides {
     };
 
     INLINE_XPU Sides() : mask{0} {}
-
+    INLINE_XPU Sides(u8 mask) : mask{mask} {}
     INLINE_XPU Sides(f32 x, f32 y, f32 z) :
         left{signbit(x)},
         bottom{signbit(y)},
@@ -442,8 +442,11 @@ struct Sides {
         front{!signbit(z)}
     {}
 
-    INLINE_XPU void flip() {
-        mask = ~mask;
+    INLINE_XPU void flip() { mask = ~mask; }
+    INLINE_XPU Sides flipped() const {
+        Sides sides = *this;
+        sides.flip();
+        return sides;
     }
 };
 
@@ -473,12 +476,7 @@ struct OctantShifts {
             x{(unsigned int)(3 * sides.left)},
             y{(unsigned int)(3 * sides.bottom)},
             z{(unsigned int)(3 * sides.back)}
-    {
-//        x = (unsigned int)(3 * sides.left);
-//                y = (unsigned int)(3 * sides.bottom);
-//                z = (unsigned int)(3 * sides.back);
-
-    }
+    {}
 
     INLINE_XPU BoxSide getBoxSide(Axis axis) const {
         return (BoxSide)(
@@ -551,10 +549,18 @@ protected:
 
     INLINE_XPU void _update() {
         rotation = T{};
+        auto x_rot = T::RotationAroundX(x);
         if (z != 0.0f) rotation = T::RotationAroundZ(z);
         if (x != 0.0f) rotation *= T::RotationAroundX(x);
         if (y != 0.0f) rotation *= T::RotationAroundY(y);
     }
+};
+
+enum BRDFType {
+    BRDF_Lambert,
+    BRDF_Blinn,
+    BRDF_Phong,
+    BRDF_CookTorrance
 };
 
 enum ColorID {
@@ -587,6 +593,17 @@ enum ColorID {
     DarkCyan,
     DarkMagenta,
     DarkYellow
+};
+static ColorID MIP_LEVEL_COLORS[9] = {
+        BrightRed,
+        BrightYellow,
+        BrightGreen,
+        BrightMagenta,
+        BrightCyan,
+        BrightBlue,
+        BrightGrey,
+        Grey,
+        DarkGrey
 };
 
 struct ByteColor {

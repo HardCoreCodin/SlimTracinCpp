@@ -6,7 +6,8 @@
 struct MeshTracer {
     u32 *stack = nullptr;
     u32 stack_size = 0;
-    RayHit triangle_hit;
+
+    mutable RayHit triangle_hit;
 
     INLINE_XPU MeshTracer(u32 *stack, u32 stack_size) : stack{stack}, stack_size{stack_size} {}
     explicit MeshTracer(u32 stack_size, memory::MonotonicAllocator *memory_allocator = nullptr) : stack_size{stack_size} {
@@ -19,7 +20,7 @@ struct MeshTracer {
         stack = stack_size ? (u32*)memory_allocator->allocate(sizeof(u32) * stack_size) : nullptr;
     }
 
-    INLINE_XPU bool hitTriangles(Triangle *triangles, u32 triangle_count, Ray &ray, RayHit &hit, bool any_hit) {
+    INLINE_XPU bool hitTriangles(Triangle *triangles, u32 triangle_count, const Ray &ray, RayHit &hit, bool any_hit) const {
         vec3 UV;
         bool found_triangle = false;
         Triangle *triangle = triangles;
@@ -47,7 +48,7 @@ struct MeshTracer {
         return found_triangle;
     }
 
-    INLINE_XPU bool trace(const Mesh &mesh, Ray &ray, RayHit &hit, bool any_hit) {
+    INLINE_XPU bool trace(const Mesh &mesh, const Ray &ray, RayHit &hit, bool any_hit) {
         bool hit_left, hit_right, found = false;
         f32 left_distance, right_distance;
 
@@ -112,6 +113,31 @@ struct MeshTracer {
             } else {
                 if (top == 0) break;
                 left_node = mesh.bvh.nodes + stack[--top];
+            }
+        }
+
+        if (found && !any_hit && mesh.normals_count | mesh.uvs_count) {
+            u32 triangle_index = hit.id;
+            TriangleVertexIndices ids;
+            f32 u = hit.uv.u;
+            f32 v = hit.uv.v;
+            f32 w = 1 - u - v;
+            if (mesh.uvs_count) {
+                ids = mesh.vertex_uvs_indices[triangle_index];
+                vec2 &UV1 = mesh.vertex_uvs[ids.v1];
+                vec2 &UV2 = mesh.vertex_uvs[ids.v2];
+                vec2 &UV3 = mesh.vertex_uvs[ids.v3];
+                hit.uv.x = fast_mul_add(UV3.x, u, fast_mul_add(UV2.u, v, UV1.u * w));
+                hit.uv.y = fast_mul_add(UV3.y, u, fast_mul_add(UV2.v, v, UV1.v * w));
+            }
+            if (mesh.normals_count) {
+                ids = mesh.vertex_normal_indices[triangle_index];
+                vec3 &N1 = mesh.vertex_normals[ids.v1];
+                vec3 &N2 = mesh.vertex_normals[ids.v2];
+                vec3 &N3 = mesh.vertex_normals[ids.v3];
+                hit.normal.x = fast_mul_add(N3.x, u, fast_mul_add(N2.x, v, N1.x * w));
+                hit.normal.y = fast_mul_add(N3.y, u, fast_mul_add(N2.y, v, N1.y * w));
+                hit.normal.z = fast_mul_add(N3.z, u, fast_mul_add(N2.z, v, N1.z * w));
             }
         }
 
