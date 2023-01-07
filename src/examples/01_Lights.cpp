@@ -120,12 +120,12 @@ struct LightsApp : SlimApp {
             if (key == 'B') draw_ssb = !draw_ssb;
             if (key == 'G') ray_tracer.use_gpu = !ray_tracer.use_gpu;
             if (key == 'Z') { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
-            if (key == '1') { ray_tracer.mode = RenderMode_Beauty; Mode_hud_line.value.string = (char*)"Beauty"; }
-            if (key == '2') { ray_tracer.mode = RenderMode_Depth; Mode_hud_line.value.string = (char*)"Depth"; }
-            if (key == '3') { ray_tracer.mode = RenderMode_Normals; Mode_hud_line.value.string = (char*)"Normals"; }
-            if (key == '4') { ray_tracer.mode = RenderMode_NormalMap; Mode_hud_line.value.string = (char*)"Normal Maps"; }
-            if (key == '5') { ray_tracer.mode = RenderMode_MipLevel; Mode_hud_line.value.string = (char*)"Mip Level"; }
-            if (key == '6') { ray_tracer.mode = RenderMode_UVs; Mode_hud_line.value.string = (char*)"UVs"; }
+            if (key == '1') { ray_tracer.render_mode = RenderMode_Beauty; Mode_hud_line.value.string = (char*)"Beauty"; }
+            if (key == '2') { ray_tracer.render_mode = RenderMode_Depth; Mode_hud_line.value.string = (char*)"Depth"; }
+            if (key == '3') { ray_tracer.render_mode = RenderMode_Normals; Mode_hud_line.value.string = (char*)"Normals"; }
+            if (key == '4') { ray_tracer.render_mode = RenderMode_NormalMap; Mode_hud_line.value.string = (char*)"Normal Maps"; }
+            if (key == '5') { ray_tracer.render_mode = RenderMode_MipLevel; Mode_hud_line.value.string = (char*)"Mip Level"; }
+            if (key == '6') { ray_tracer.render_mode = RenderMode_UVs; Mode_hud_line.value.string = (char*)"UVs"; }
         }
     }
 

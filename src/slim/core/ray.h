@@ -216,7 +216,7 @@ struct Ray {
         bool found_triangle = false;
 
         RayHit current_hit;
-        current_hit.uv_coverage = 4.0f / SQRT3;
+        current_hit.uv_coverage = SQRT3 / 4.0f;
 
         for (u8 t = 0; t < 4; t++) {
             tangent_pos = face_normal = vec3{t == 3 ? TET_MAX : -TET_MAX};

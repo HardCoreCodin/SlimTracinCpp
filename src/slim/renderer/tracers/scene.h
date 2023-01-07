@@ -58,13 +58,14 @@ struct SceneTracer {
     }
 
     INLINE_XPU void finalizeHit(Geometry *geometry,  RayHit &hit) {
+        const vec2 &uv_repeat{scene.materials[geometry->material_id].uv_repeat};
+        hit.uv *= uv_repeat;
         if (hit.from_behind) hit.normal = -hit.normal;
 
         // Compute uvs and uv-coverage using Ray Cones:
-        // Note: This is done while the hit is still in LOCAL space and using its local-ray direction(!)
-        const vec2 &uv_repeat{scene.materials[geometry->material_id].uv_repeat};
-        hit.uv *= uv_repeat;
-        hit.uv_coverage *= hit.cone_width_scaling_factor * hit.distance * hit.distance * _closest_hit_ray_direction.squaredLength();
+        // Note: This is done while the hit is still in LOCAL space and using its LOCAL and PRE-NORMALIZED ray direction
+        hit.cone_width = hit.distance * hit.cone_width_scaling_factor;
+        hit.uv_coverage *= hit.cone_width * hit.cone_width / _closest_hit_ray_direction.squaredLength();;
         hit.uv_coverage /= -(hit.normal.dot(_closest_hit_ray_direction)) * uv_repeat.u * uv_repeat.v;
 
         // Convert Ray Hit to world space, using the "t" value from the local-space trace:

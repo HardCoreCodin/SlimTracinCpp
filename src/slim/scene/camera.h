@@ -12,7 +12,6 @@ struct Camera : OrientationUsing3x3Matrix {
     f32 dolly_amount{0};
 
     XPU Camera() : OrientationUsing3x3Matrix{}, position{0.0f} {}
-    XPU explicit Camera(const vec3 &position) : OrientationUsing3x3Matrix{}, position{position} {}
     XPU explicit Camera(const vec3 &position, const vec3 &orientation = vec3{0.0f}, f32 zoom_amount = CAMERA_DEFAULT__FOCAL_LENGTH) :
             OrientationUsing3x3Matrix{orientation.x, orientation.y, orientation.z},
             position{position}, current_velocity{vec3{0}}, focal_length{zoom_amount}, zoom_amount{zoom_amount} {}

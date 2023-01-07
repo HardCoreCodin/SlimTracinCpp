@@ -1,7 +1,5 @@
 #pragma once
 
-//#include "./closest_hit/debug.h"
-//#include "./closest_hit/surface.h"
 #include "./closest_hit/lights.h"
 #include "../viewport/viewport.h"
 #include "./tracers/scene.h"
@@ -22,8 +20,8 @@ struct RayTracer : public SceneTracer {
     Shaded shaded;
     mat3 inverted_camera_rotation;
     vec3 start, right, down, camera_position;
-
-    u32 max_depth = 10;
+    f32 camera_focal_length;
+    u32 max_depth = 4;
     bool use_gpu = false;
     bool use_ssb = false;
 
@@ -37,15 +35,13 @@ struct RayTracer : public SceneTracer {
         Canvas &canvas = viewport.canvas;
         Camera &camera = *viewport.camera;
 
-        shaded.cone_width_scaling_factor = (2.0f / viewport.canvas.dimensions.f_height) / camera.focal_length;
-        shaded.cone_width_scaling_factor *= shaded.cone_width_scaling_factor;
-
         inverted_camera_rotation = camera.rotation.inverted();
         _world_ray.origin = camera.position;
 
         f32 left_of_center = 1.0f + (canvas.antialias == SSAA ? -(canvas.dimensions.f_width) : -canvas.dimensions.h_width);
         f32 up_of_center = -1.0f + (canvas.antialias == SSAA ? (canvas.dimensions.f_height) : canvas.dimensions.h_height);
 
+        camera_focal_length = camera.focal_length;
         camera_position = camera.position;
         down = -camera.up;
         right = camera.right;
@@ -66,34 +62,51 @@ struct RayTracer : public SceneTracer {
         Color color{Black};
         vec3 direction = start;
         Pixel *pixel = canvas.pixels;
+
+//        vec2 screen_center_coords{canvas.dimensions.h_width, canvas.dimensions.h_height};
+//        vec2 screen_center_to_pixel_center = _world_ray.pixel_coords - screen_center_coords;
+//        f32 distance_to_projection_plane = canvas.dimensions.h_height * camera_focal_length;
+//        f32 t_to_pixel = sqrtf(screen_center_to_pixel_center.squaredLength() + distance_to_projection_plane * distance_to_projection_plane);
+//
         vec2i &coord{_world_ray.pixel_coords};
+        vec2 c2p{0.5f - canvas.dimensions.h_width, canvas.dimensions.h_height - 0.5f}; // Screen center to_pixel_center
+        f32 d2 = canvas.dimensions.h_height * camera_focal_length; // Distance to projection plane
+        d2 *= d2;
         for (coord.y = 0; _world_ray.pixel_coords.y < height; coord.y++) {
-            for (coord.x = 0; coord.x < width; coord.x++, pixel++) {
-                renderPixel(canvas, direction, color);
-                direction += camera.right;
-            }
-            start -= camera.up;
             direction = start;
+            c2p.x = 0.5f - canvas.dimensions.h_width;
+
+            for (coord.x = 0; coord.x < width; coord.x++, pixel++) {
+                renderPixel(canvas, direction, sqrtf(c2p.squaredLength() + d2), color);
+
+                direction += camera.right;
+                c2p.x += 1.0f;
+            }
+
+            start -= camera.up;
+            c2p.y -= 1.0f;
         }
     }
 
-    INLINE_XPU void renderPixel(const Canvas &canvas, const vec3 &direction, Color &color) {
+    INLINE_XPU void renderPixel(const Canvas &canvas, vec3 direction, f32 t_to_pixel, Color &color) {
         f32 hit_depth = INFINITY;
+        f32 scaling_factor = 1.0f / direction.length();
+        direction *= scaling_factor;
+
         color = Black;
+
         _world_ray.reset(camera_position, direction);
         shaded.geometry = use_ssb ? findClosestGeoForPrimaryRay() : _trace(_world_ray, shaded);
 
         bool hit_light_only = false;
         bool hit = shaded.geometry;
         if (hit) {
+            shaded.cone_width_scaling_factor = scaling_factor / t_to_pixel;
             finalizeHit(shaded.geometry, shaded);
-            f32 ray_length = _world_ray.direction.length();
-            shaded.distance *= ray_length;
-            _world_ray.direction /= ray_length;
             hit_depth = (inverted_camera_rotation * (shaded.position - camera_position)).z;
             color = shadePixel();
         } else if (render_mode == RenderMode_Beauty && scene.lights) {
-            hit_light_only = lights_shader.shadeLights(camera_position, direction.normalized(), shaded.distance, color);
+            hit_light_only = lights_shader.shadeLights(camera_position, direction, INFINITY, color);
             if (hit_light_only)
                 hit_depth = INFINITY;
         }
@@ -180,6 +193,7 @@ struct RayTracer : public SceneTracer {
 
     Geometry* findClosestGeoForPrimaryRay() {
         _temp_hit.distance = shaded.distance = INFINITY;
+        _temp_hit.cone_width_scaling_factor = shaded.cone_width_scaling_factor;
         vec2i &coord{_world_ray.pixel_coords};
         RectI *bounds = scene.screen_bounds;
         Geometry *geo = scene.geometries;

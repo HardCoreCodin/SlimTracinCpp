@@ -1,6 +1,5 @@
 #include "../slim/scene/selection.h"
 #include "../slim/draw/hud.h"
-#include "../slim/draw/bvh.h"
 #include "../slim/draw/selection.h"
 #include "../slim/renderer/raytracer.h"
 #include "../slim/app.h"
