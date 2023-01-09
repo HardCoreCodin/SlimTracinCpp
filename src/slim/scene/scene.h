@@ -69,7 +69,7 @@ struct Scene {
             case GeometryType_Quad  : vertex_count = QUAD__VERTEX_COUNT; vertices = quad_vertices.array; break;
             case GeometryType_Mesh  : vertex_count = BOX__VERTEX_COUNT;  vertices = mesh_vertices.array; mesh_vertices = BoxVertices{meshes[geo.id].aabb}; break;
             case GeometryType_Sphere: {
-                vec3 center_to_orbit{2.0f, 0.0f, 0.0f};
+                vec3 center_to_orbit{1.0f, 0.0f, 0.0f};
                 mat3 rotation{mat3::RotationAroundY(TAU / (f32)sphere_steps)};
 
                 // Transform vertices positions from local-space to world-space:

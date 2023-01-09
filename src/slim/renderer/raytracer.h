@@ -8,7 +8,7 @@
 
 
 #ifdef __CUDACC__
-#include "./raytracer_kernel.h"
+#include "./raytracer_kernel.H"
 #endif
 
 
@@ -17,13 +17,19 @@ struct RayTracer : public SceneTracer {
     LightsShader lights_shader;
     enum RenderMode render_mode = RenderMode_Beauty;
 
-    Shaded shaded;
+    Geometry *hit_geometry = nullptr;
+    Material *hit_material = nullptr;
+
+    Shader shader;
+    RayHit _world_hit;
+    Sampler sampler{_world_hit, scene.textures};
     mat3 inverted_camera_rotation;
     vec3 start, right, down, camera_position;
-    f32 camera_focal_length;
+    vec2 screen_center_to_pixel_center;
+    f32 squared_distance_to_projection_plane, z_depth;
     u32 max_depth = 4;
     bool use_gpu = false;
-    bool use_ssb = false;
+    bool use_ssb = true;
 
     INLINE_XPU RayTracer(Scene &scene, u32 *stack, u32 stack_size, u32 *mesh_stack, u32 mesh_stack_size, RenderMode render_mode = RenderMode_Beauty) :
             SceneTracer{scene, stack, stack_size, mesh_stack, mesh_stack_size}, lights_shader{scene.lights, scene.counts.lights}, render_mode{render_mode} {}
@@ -41,7 +47,6 @@ struct RayTracer : public SceneTracer {
         f32 left_of_center = 1.0f + (canvas.antialias == SSAA ? -(canvas.dimensions.f_width) : -canvas.dimensions.h_width);
         f32 up_of_center = -1.0f + (canvas.antialias == SSAA ? (canvas.dimensions.f_height) : canvas.dimensions.h_height);
 
-        camera_focal_length = camera.focal_length;
         camera_position = camera.position;
         down = -camera.up;
         right = camera.right;
@@ -59,7 +64,6 @@ struct RayTracer : public SceneTracer {
     void renderOnCPU(const Canvas &canvas, const Camera &camera) {
         u16 width = canvas.dimensions.width * (canvas.antialias == SSAA ? 2 : 1);
         u16 height = canvas.dimensions.height * (canvas.antialias == SSAA ? 2 : 1);
-        Color color{Black};
         vec3 direction = start;
         Pixel *pixel = canvas.pixels;
 
@@ -68,118 +72,214 @@ struct RayTracer : public SceneTracer {
 //        f32 distance_to_projection_plane = canvas.dimensions.h_height * camera_focal_length;
 //        f32 t_to_pixel = sqrtf(screen_center_to_pixel_center.squaredLength() + distance_to_projection_plane * distance_to_projection_plane);
 //
+        screen_center_to_pixel_center.x = 0.5f - canvas.dimensions.h_width;
+        screen_center_to_pixel_center.y = canvas.dimensions.h_height - 0.5f;
+        squared_distance_to_projection_plane = canvas.dimensions.h_height * camera.focal_length;
+        squared_distance_to_projection_plane *= squared_distance_to_projection_plane;
+
         vec2i &coord{_world_ray.pixel_coords};
-        vec2 c2p{0.5f - canvas.dimensions.h_width, canvas.dimensions.h_height - 0.5f}; // Screen center to_pixel_center
-        f32 d2 = canvas.dimensions.h_height * camera_focal_length; // Distance to projection plane
-        d2 *= d2;
-        for (coord.y = 0; _world_ray.pixel_coords.y < height; coord.y++) {
-            direction = start;
-            c2p.x = 0.5f - canvas.dimensions.h_width;
 
-            for (coord.x = 0; coord.x < width; coord.x++, pixel++) {
-                renderPixel(canvas, direction, sqrtf(c2p.squaredLength() + d2), color);
+        if (render_mode == RenderMode_Beauty) {
+            for (coord.y = 0; _world_ray.pixel_coords.y < height; coord.y++) {
+                direction = start;
+                screen_center_to_pixel_center.x = 0.5f - canvas.dimensions.h_width;
 
-                direction += camera.right;
-                c2p.x += 1.0f;
+                for (coord.x = 0; coord.x < width; coord.x++, pixel++) {
+                    castPrimaryRay(direction);
+                    renderPixelBeauty(canvas);
+
+                    direction += camera.right;
+                    screen_center_to_pixel_center.x += 1.0f;
+                }
+
+                start -= camera.up;
+                screen_center_to_pixel_center.y -= 1.0f;
             }
+        } else
+//            if (render_mode == RenderMode_Classic) {
+//            for (coord.y = 0; _world_ray.pixel_coords.y < height; coord.y++) {
+//                direction = start;
+//                screen_center_to_pixel_center.x = 0.5f - canvas.dimensions.h_width;
+//
+//                for (coord.x = 0; coord.x < width; coord.x++, pixel++) {
+//                    if (castPrimaryRay(direction))
+//                        renderPixelClassic(canvas);
+//
+//                    direction += camera.right;
+//                    screen_center_to_pixel_center.x += 1.0f;
+//                }
+//
+//                start -= camera.up;
+//                screen_center_to_pixel_center.y -= 1.0f;
+//            }
+//        } else
+        {
+            for (coord.y = 0; _world_ray.pixel_coords.y < height; coord.y++) {
+                direction = start;
+                screen_center_to_pixel_center.x = 0.5f - canvas.dimensions.h_width;
 
-            start -= camera.up;
-            c2p.y -= 1.0f;
+                for (coord.x = 0; coord.x < width; coord.x++, pixel++) {
+                    if (castPrimaryRay(direction))
+                        canvas.setPixel(_world_ray.pixel_coords.x, _world_ray.pixel_coords.y, shadeDebug(), 1, z_depth);
+
+                    direction += camera.right;
+                    screen_center_to_pixel_center.x += 1.0f;
+                }
+
+                start -= camera.up;
+                screen_center_to_pixel_center.y -= 1.0f;
+            }
         }
     }
 
-    INLINE_XPU void renderPixel(const Canvas &canvas, vec3 direction, f32 t_to_pixel, Color &color) {
-        f32 hit_depth = INFINITY;
+    INLINE_XPU bool castPrimaryRay(vec3 direction) {
         f32 scaling_factor = 1.0f / direction.length();
         direction *= scaling_factor;
-
-        color = Black;
+        z_depth = INFINITY;
 
         _world_ray.reset(camera_position, direction);
-        shaded.geometry = use_ssb ? findClosestGeoForPrimaryRay() : _trace(_world_ray, shaded);
+        hit_geometry = use_ssb ? findClosestGeoForPrimaryRay() : _trace(_world_ray, _world_hit);
+        if (!hit_geometry) return false;
 
-        bool hit_light_only = false;
-        bool hit = shaded.geometry;
-        if (hit) {
-            shaded.cone_width_scaling_factor = scaling_factor / t_to_pixel;
-            finalizeHit(shaded.geometry, shaded);
-            hit_depth = (inverted_camera_rotation * (shaded.position - camera_position)).z;
-            color = shadePixel();
-        } else if (render_mode == RenderMode_Beauty && scene.lights) {
-            hit_light_only = lights_shader.shadeLights(camera_position, direction, INFINITY, color);
-            if (hit_light_only)
-                hit_depth = INFINITY;
-        }
+        _world_hit.cone_width_scaling_factor = scaling_factor / sqrtf(
+                screen_center_to_pixel_center.squaredLength() +
+                squared_distance_to_projection_plane
+        );
+        finalizeHit(hit_geometry, _world_hit);
+        prepareForShading();
+        z_depth = (inverted_camera_rotation * (_world_hit.position - camera_position)).z;
 
-        if (render_mode == RenderMode_Beauty)
-            color.applyToneMapping();
-
-        if (hit || hit_light_only)
-            canvas.setPixel(_world_ray.pixel_coords.x, _world_ray.pixel_coords.y, color, 1, hit_depth);
+        return true;
     }
 
-    INLINE_XPU Color shadePixel() {
-        shaded.prepareForShading(_world_ray, scene.materials, scene.textures);
+    INLINE_XPU Color shadeDebug() {
         switch (render_mode) {
-            case RenderMode_UVs      : return shaded.getColorByUV();
-            case RenderMode_Depth    : return shaded.getColorByDistance();
-            case RenderMode_MipLevel : return shaded.material->isTextured() ? shaded.getColorByMipLevel(scene.textures[0]) : Grey;
-            case RenderMode_Normals  : return directionToColor(shaded.normal);
-            case RenderMode_NormalMap: return directionToColor(shaded.sampleNormal(scene.textures));
-            default: return shaded.material->isEmissive() ? (shaded.from_behind ? Black : shaded.material->emission) : shadeSurface();
+            case RenderMode_UVs      : return getColorByUV(_world_hit.uv);
+            case RenderMode_Depth    : return getColorByDistance(_world_hit.distance);
+            case RenderMode_MipLevel : return hit_material->isTextured() ? MIP_LEVEL_COLORS[scene.textures[0].mipLevel(_world_hit.uv_coverage)] : Grey;
+            case RenderMode_Normals  : return directionToColor(_world_hit.normal);
+            case RenderMode_NormalMap: return directionToColor(sampler.sampleNormal());
+            default: return Black;
         }
     }
 
-    Color shadeSurface() {
-        f32 max_distance = shaded.distance;
+    INLINE_XPU void renderPixelBeauty(const Canvas &canvas) {
+        bool hit = hit_geometry;
+        Color color;
 
-        Color current_color, color;
+        if (hit && !_world_hit.from_behind && hit_material->isEmissive()) color = hit_material->emission;
+        if (scene.lights) {
+            if (hit) {
+                shadePBR(color);
+            } else {
+                hit = lights_shader.shadeLights(camera_position, _world_ray.direction, INFINITY, color);
+                if (hit) z_depth = INFINITY;
+            }
+        }
+
+        if (hit) {
+            color.applyToneMapping();
+            canvas.setPixel(_world_ray.pixel_coords.x, _world_ray.pixel_coords.y, color, 1, z_depth);
+        }
+    }
+
+//    INLINE_XPU void renderPixelClassic(const Canvas &canvas) {
+//        bool hit = _world_hit.geometry;
+//        Color color{hit && !_world_hit.from_behind && _world_hit.material->isEmissive() ? Black : _world_hit.material->emission};
+//        if (scene.lights) {
+//            if (hit) {
+//                shadeClassic(color);
+//            } else {
+//                hit = lights_shader.shadeLights(camera_position, _world_ray.direction, INFINITY, color);
+//                if (hit) z_depth = INFINITY;
+//            }
+//        }
+//
+//        if (hit) {
+//            color.applyToneMapping();
+//            canvas.setPixel(_world_ray.pixel_coords.x, _world_ray.pixel_coords.y, color, 1, z_depth);
+//        }
+//    }
+
+//    INLINE_XPU void shadeClassic(Color &color) {
+//        color += scene.ambient_light.color;
+//
+//        Light *light = scene.lights;
+//        for (u32 i = 0; i < scene.counts.lights; i++, light++) {
+//            if (_world_hit.isFacingLight(*light) &&
+//                !inShadow(_world_hit.position,
+//                          _world_hit.light_direction,
+//                          _world_hit.light_distance))
+//                _world_hit.shadeFromLightClassic(*light, color);
+//        }
+//    }
+
+    void shadePBR(Color &color) {
+        f32 max_distance = _world_hit.distance;
+
+        Light *light;
+        Color current_color;
         Color throughput = 1.0f;
         u32 depth_left = max_depth;
         _world_ray.depth = _temp_ray.depth = _shadow_ray.depth = 1;
         while (depth_left) {
-            bool is_ref = shaded.material->isReflective() ||
-                          shaded.material->isRefractive();
-            current_color = is_ref ? Black : scene.ambient_light.color;
-            if (scene.lights) {
-                for (u32 i = 0; i < scene.counts.lights; i++) {
-                    const Light &light = scene.lights[i];
-                    shaded.setLight(light);
-                    if (shaded.NdotL > 0 && !inShadow(shaded.position, shaded.light_direction, shaded.light_distance))
-                        current_color = ((light.intensity / shaded.light_distance_squared) * light.color).mulAdd(shaded.radianceFraction(), current_color);
-                }
-            }
+            current_color = Black;
+
+            light = scene.lights;
+            for (u32 i = 0; i < scene.counts.lights; i++, light++)
+                if (shader.isFacingLight(*light, _world_hit.position) && !inShadow(_world_hit.position, shader.L, shader.Ld))
+                    shader.shadeFromLight(*light,current_color);
 
 //            if (scene_has_emissive_quads &&
 //                shadeFromEmissiveQuads(ray, current_color))
-//                max_distance = shaded.distance;
+//                max_distance = _world_hit.distance;
 
             color = current_color.mulAdd(throughput, color);
             if (scene.lights)
                 lights_shader.shadeLights(_world_ray.origin, _world_ray.direction, max_distance, color);
 
-            if ((shaded.material->isReflective() ||
-                 shaded.material->isRefractive()) &&
+            if ((hit_material->isReflective() ||
+                 hit_material->isRefractive()) &&
                 --depth_left) {
                 _world_ray.depth++;
                 _temp_ray.depth++;
                 _shadow_ray.depth++;
-                vec3 &next_ray_direction{
-                        shaded.material->isRefractive() ?
-                        shaded.refracted_direction :
-                        shaded.reflected_direction
-                };
+                vec3 &next_ray_direction{hit_material->isRefractive() ? shader.RF : shader.R};
 
-                shaded.geometry = findClosestGeometry(shaded.position, next_ray_direction, shaded);
-                if (shaded.geometry) {
-                    shaded.prepareForShading(_world_ray, scene.materials, scene.textures);
-                    if (shaded.geometry->type == GeometryType_Quad && shaded.material->isEmissive()) {
-                        color = shaded.from_behind ? Black : shaded.material->emission;
+//                Color next_ray_throughput{White};
+//                shader.refracted = shader.refracted && hit_material->isRefractive();
+//                if (shader.brdf == BRDF_CookTorrance) {
+//                    shader.cos_wi_h = clampedValue(shader.R.dot(shader.N));
+//                    shader.F = schlickFresnel(shader.cos_wi_h, shader.F0);
+//                    shader.D = ggxTrowbridgeReitz_D(shader.roughness, 1.0f);
+//                    shader.G = ggxSchlickSmith_G(shader.roughness, shader.cos_wi_h, shader.cos_wi_h);
+//                    shader.Ks = shader.F * (shader.D * shader.G
+//                                            /
+//                                            (4.0f * shader.cos_wi_h * shader.cos_wi_h)
+//                    );
+//
+//                    if (shader.refracted)
+//                        next_ray_throughput = shader.Ks;
+//                    else
+//                        next_ray_throughput -= shader.Ks;
+//                } else {
+//                    if (shader.refracted)
+//                        next_ray_throughput = hit_material->reflectivity;
+//                    else
+//                        next_ray_throughput -= hit_material->reflectivity;
+//                }
+//                throughput *= next_ray_throughput;
+
+                hit_geometry = findClosestGeometry(_world_hit.position, next_ray_direction, _world_hit);
+                if (hit_geometry) {
+                    prepareForShading();
+                    if (hit_geometry->type == GeometryType_Quad && hit_material->isEmissive()) {
+                        color = _world_hit.from_behind ? Black : hit_material->emission;
                         break;
                     }
 
-                    if (shaded.material->brdf != BRDF_CookTorrance)
-                        throughput *= shaded.material->reflectivity;
+                    if (hit_material->brdf != BRDF_CookTorrance)
+                        throughput *= hit_material->reflectivity;
 
                     continue;
                 }
@@ -187,13 +287,11 @@ struct RayTracer : public SceneTracer {
 
             break;
         }
-
-        return color;
     }
 
     Geometry* findClosestGeoForPrimaryRay() {
-        _temp_hit.distance = shaded.distance = INFINITY;
-        _temp_hit.cone_width_scaling_factor = shaded.cone_width_scaling_factor;
+        _temp_hit.distance = _world_hit.distance = INFINITY;
+        _temp_hit.cone_width_scaling_factor = _world_hit.cone_width_scaling_factor;
         vec2i &coord{_world_ray.pixel_coords};
         RectI *bounds = scene.screen_bounds;
         Geometry *geo = scene.geometries;
@@ -203,18 +301,30 @@ struct RayTracer : public SceneTracer {
             if (!(geo->flags & GEOMETRY_IS_VISIBLE) ||
                 (i32)coord.x <  bounds->left ||
                 (i32)coord.x >  bounds->right ||
-                (i32)coord.y >  bounds->top ||
+                (i32)coord.y <  bounds->top ||
                 (i32)coord.y >  bounds->bottom)
                 continue;
 
-            if (_temp_hit.distance < shaded.distance) {
-                hit_geo = geo;
-                shaded = _temp_hit;
-                _closest_hit_ray_direction = _temp_ray.direction;
+            if (hitGeometryInLocalSpace(*geo, _world_ray, _temp_hit, false)) {
+                if (_temp_hit.distance < _world_hit.distance) {
+                    hit_geo = geo;
+                    _world_hit = _temp_hit;
+                    _closest_hit_ray_direction = _temp_ray.direction;
+                }
             }
         }
 
         return hit_geo;
+    }
+
+    INLINE_XPU void prepareForShading() {
+        hit_material = sampler.material = scene.materials + hit_geometry->material_id;
+        if (hit_material->hasNormalMap()) _world_hit.normal = sampler.sampleNormal(_world_hit.normal);
+        shader.reset(*hit_material,
+                     _world_hit.normal,
+                     _world_ray.direction,
+                     _world_hit.from_behind,
+                     hit_material->hasAlbedoMap() ? sampler.sampleAlbedo() : White);
     }
 
 //    INLINE bool shadeFromEmissiveQuads(Ray &ray, Color &color) {
@@ -229,16 +339,16 @@ struct RayTracer : public SceneTracer {
 //            if (quad.type != GeometryType_Quad || !(emissive_material.isEmissive()))
 //                continue;
 //
-//            quad.transform.internPosAndDir(shaded.viewing_origin, shaded.viewing_direction, Ro, Rd);
-//            if (local_ray.hitsDefaultQuad(shaded, quad.flags & GEOMETRY_IS_TRANSPARENT)) {
-//                shaded.position = quad.transform.externPos(shaded.position);
-//                f32 t2 = (shaded.position - shaded.viewing_origin).squaredLength();
-//                if (t2 < shaded.distance*shaded.distance) {
+//            quad.transform.internPosAndDir(_world_hit.viewing_origin, _world_hit.viewing_direction, Ro, Rd);
+//            if (local_ray.hitsDefaultQuad(_world_hit, quad.flags & GEOMETRY_IS_TRANSPARENT)) {
+//                _world_hit.position = quad.transform.externPos(_world_hit.position);
+//                f32 t2 = (_world_hit.position - _world_hit.viewing_origin).squaredLength();
+//                if (t2 < _world_hit.distance*_world_hit.distance) {
 //                    local_hit.distance = sqrtf(t2);
 //                    local_hit.id = i;
 ////                local_hit.geo_type = GeometryType_Quad;
 ////                local_hit.material_id = quad.material_id;
-//                    *((RayHit*)&shaded) = local_hit;
+//                    *((RayHit*)&_world_hit) = local_hit;
 //                    found = true;
 //                }
 //            }
@@ -246,15 +356,15 @@ struct RayTracer : public SceneTracer {
 //            emissive_quad_normal.x = emissive_quad_normal.z = 0;
 //            emissive_quad_normal.y = 1;
 //            emissive_quad_normal = quad.transform.rotation * emissive_quad_normal;
-//            shaded.light_direction = ray.direction = quad.transform.position - shaded.position;
-//            if (emissive_quad_normal.dot(shaded.light_direction) >= 0)
+//            _world_hit.light_direction = ray.direction = quad.transform.position - _world_hit.position;
+//            if (emissive_quad_normal.dot(_world_hit.light_direction) >= 0)
 //                continue;
 //
-//            f32 emission_intensity = shaded.normal.dot(getAreaLightVector(quad.transform, shaded.position, shaded.emissive_quad_vertices));
+//            f32 emission_intensity = _world_hit.normal.dot(getAreaLightVector(quad.transform, _world_hit.position, _world_hit.emissive_quad_vertices));
 //            if (emission_intensity > 0) {
 //                bool skip = true;
 //                for (u8 j = 0; j < 4; j++) {
-//                    if (shaded.normal.dot(shaded.emissive_quad_vertices[j] - shaded.position) >= 0) {
+//                    if (_world_hit.normal.dot(_world_hit.emissive_quad_vertices[j] - _world_hit.position) >= 0) {
 //                        skip = false;
 //                        break;
 //                    }
@@ -265,12 +375,12 @@ struct RayTracer : public SceneTracer {
 //                f32 shaded_light = 1;
 //                for (u32 s = 0; s < scene.counts.geometries; s++) {
 //                    Geometry &shadowing_primitive = scene.geometries[s];
-//                    if (&quad == shaded.geometry ||
+//                    if (&quad == _world_hit.geometry ||
 //                        &quad == &shadowing_primitive ||
 //                        emissive_quad_normal.dot(shadowing_primitive.transform.position - quad.transform.position) <= 0)
 //                        continue;
 //
-//                    shadowing_primitive.transform.internPosAndDir(shaded.position, shaded.light_direction, Ro, Rd);
+//                    shadowing_primitive.transform.internPosAndDir(_world_hit.position, _world_hit.light_direction, Ro, Rd);
 //                    Ro = Rd.scaleAdd(TRACE_OFFSET, Ro);
 //
 //                    f32 d = 1;
@@ -295,9 +405,9 @@ struct RayTracer : public SceneTracer {
 //                        shaded_light = d;
 //                }
 //                if (shaded_light > 0) {
-//                    shaded.NdotL = clampedValue(shaded.normal.dot(shaded.light_direction));
-//                    if (shaded.NdotL > 0.0f) {
-//                        Color radiance_fraction = shaded.radianceFraction();
+//                    _world_hit.NdotL = clampedValue(_world_hit.normal.dot(_world_hit.light_direction));
+//                    if (_world_hit.NdotL > 0.0f) {
+//                        Color radiance_fraction = _world_hit.radianceFraction();
 //                        color = radiance_fraction.mulAdd(emissive_material.emission * (emission_intensity * shaded_light), color);
 //                    }
 //                }

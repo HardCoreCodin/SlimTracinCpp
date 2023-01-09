@@ -4,7 +4,7 @@
 #include "../slim/app.h"
 
 // Or using the single-header file:
-//#include "../slim.h"
+//#include "../slim.H"
 
 struct ClassicShadersApp : SlimApp {
     // Viewport:
@@ -17,8 +17,8 @@ struct ClassicShadersApp : SlimApp {
 
     // Scene:
     Light key_light{ {10, 10, -5}, {1.0f, 1.0f, 0.65f}, 1.1f * 40.0f};
-    Light fill_light{ {-10, 10, -5}, {0.65f, 0.65f, 1.0f}, 1.2f * 40.0f};
-    Light rim_light{ {2, 5, 12}, {1.0f, 0.25f, 0.25f}, 0.9f * 40.0f};
+    Light fill_light{ {-10, 10, -5}, {0.65f, 0.65f, 1.0f}, 0.9f * 40.0f};
+    Light rim_light{ {2, 5, 12}, {1.0f, 0.25f, 0.25f}, 1.2f * 40.0f};
     Light *lights{&key_light};
 
     enum MATERIAL {
@@ -28,9 +28,10 @@ struct ClassicShadersApp : SlimApp {
         MATERIAL_COUNT
     };
 
-    Material rough_material{BRDF_CookTorrance, 0.4f, 0.0f, MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP, 2, {0.8f, 1.0f, 0.8f}};
-    Material mirror_material{BRDF_CookTorrance, 0.1f, 0.9f, MATERIAL_HAS_NORMAL_MAP | MATERIAL_IS_REFLECTIVE, 2, 0.0f, 0.9f};
-    Material glass_material{BRDF_Blinn, 0.1f, 0.0f, MATERIAL_HAS_NORMAL_MAP | MATERIAL_IS_REFRACTIVE, 2, 0.1f, {0.7f, 0.9f, 0.7f}, 0.0f, 1.0f, 1.0f, IOR_AIR + 0.1f};
+    Material rough_material{BRDF_Lambert, 1.0f, 0.0f, 0, 0, {0.8f, 1.0f, 0.8f}};
+    Material mirror_material{BRDF_Blinn, 0.0f, 0.0f, MATERIAL_IS_REFLECTIVE, 0, 1.0f, 0.9f};
+    Material glass_material{BRDF_Blinn, 0.0f, 0.0f, MATERIAL_IS_REFRACTIVE, 0, 1.0f,
+                            {0.7f, 0.9f, 0.7f}, 0.0f, 1.0f, 1.0f, IOR_AIR + 0.1f};
     Material *materials{&rough_material};
 
     char string_buffers[2][200];
@@ -38,19 +39,16 @@ struct ClassicShadersApp : SlimApp {
             String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
             String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
     };
-    Texture floor_albedo_map;
-    Texture floor_normal_map;
-    Texture *textures = &floor_albedo_map;
 
     Geometry floor{{{}, {}, {40, 1, 40}}, GeometryType_Quad, MATERIAL_ROUGH};
     Geometry wall{{{-15, 5, 5}, {0.0f, 0.0f, 90.0f * DEG_TO_RAD}, {4, 1, 8}}, GeometryType_Quad, MATERIAL_MIRROR};
-    Geometry box{{{3, 4, 0}, {0.02f, 0.04f, 0.0f}, {2.5f}}, GeometryType_Box, MATERIAL_GLASS, GEOMETRY_IS_VISIBLE};
-    Geometry tet{{{-3, 4, 12}, {0.02f, 0.04f, 0.06f}, {2.5f}}, GeometryType_Tet, MATERIAL_GLASS, GEOMETRY_IS_VISIBLE};
-    Geometry sphere{{{-9, 5, 3}, {}, {2.5f}}, GeometryType_Sphere, MATERIAL_GLASS, GEOMETRY_IS_VISIBLE};
+    Geometry box{{{3, 4, 0}, {0.02f, 0.04f, 0.0f}, {2.5f}}, GeometryType_Box, MATERIAL_GLASS};
+    Geometry tet{{{-3, 4, 12}, {0.02f, 0.04f, 0.06f}, {2.5f}}, GeometryType_Tet, MATERIAL_GLASS};
+    Geometry sphere{{{-9, 5, 3}, {}, {2.5f}}, GeometryType_Sphere, MATERIAL_GLASS};
     Geometry *geometries{&floor};
 
-    SceneCounts counts{5, 1, 3, MATERIAL_COUNT, 2};
-    Scene scene{counts, nullptr, geometries, cameras, lights, materials, textures, texture_files};
+    SceneCounts counts{5, 1, 3, MATERIAL_COUNT};
+    Scene scene{counts, nullptr, geometries, cameras, lights, materials, nullptr, texture_files};
     Selection selection;
 
     RayTracer ray_tracer{scene, (u32)counts.geometries, scene.mesh_stack_size};
@@ -80,19 +78,7 @@ struct ClassicShadersApp : SlimApp {
 
     ClassicShadersApp() {
         updateSelectionInHUD();
-        rough_material.texture_count = 2;
-        rough_material.texture_ids[0] = 0;
-        rough_material.texture_ids[1] = 1;
-        mirror_material.texture_count = 2;
-        mirror_material.texture_ids[0] = 0;
-        mirror_material.texture_ids[1] = 1;
-        mirror_material.uv_repeat = 0.25f;
-        mirror_material.normal_magnitude = 0.1f;
-        glass_material.texture_count = 2;
-        glass_material.texture_ids[0] = 0;
-        glass_material.texture_ids[1] = 1;
-        glass_material.uv_repeat = 0.5f;
-        glass_material.normal_magnitude = 0.2f;
+//        glass_material.F0 = F0_Glass_Low;
     }
 
     void OnRender() override {
@@ -120,13 +106,13 @@ struct ClassicShadersApp : SlimApp {
             updateSelectionInHUD();
         }
 
-        quat rot = quat::AxisAngle(rotation.axis, delta_time);
-        for (u8 i = 0; i < scene.counts.geometries; i++) {
-            Geometry &geo = geometries[i];
-
-            if (geo.type != GeometryType_Quad && !(controls::is_pressed::alt && &geo == selection.geometry))
-                geo.transform.rotation = (geo.transform.rotation * rot).normalized();
-        }
+//        quat rot = quat::AxisAngle(rotation.axis, delta_time);
+//        for (u8 i = 0; i < scene.counts.geometries; i++) {
+//            Geometry &geo = geometries[i];
+//
+//            if (geo.type != GeometryType_Quad && !(controls::is_pressed::alt && &geo == selection.geometry))
+//                geo.transform.rotation = (geo.transform.rotation * rot).normalized();
+//        }
     }
 
     void OnKeyChanged(u8 key, bool is_pressed) override {

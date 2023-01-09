@@ -5,10 +5,10 @@
 
 bool computeSSB(RectI &bounds, const vec3 &pos, f32 r, f32 focal_length, const Dimensions &dimensions) {
 /*
- h = y - t
+ H = y - t
  HH = zz + tt
 
- r/z = h/H
+ R/z = H/H
  rH = zh
  rrHH = zzhh
  rr(zz + tt) = zz(y -t)(y - t)
@@ -34,12 +34,12 @@ bool computeSSB(RectI &bounds, const vec3 &pos, f32 r, f32 focal_length, const D
  t/z = 1/(rr - zz) * (-yz +/- sqrt(yyzz - zz*yy - rr*rr + zz*rr + rr*yy))
  t/z = 1/(rr - zz) * (-yz +/- sqrt(0 - rr*rr + zz*rr + rr*yy))
  t/z = 1/(rr - zz) * (-yz +/- sqrt(rr(yy - rr + zz))
- t/z = -1/(rr - zz) * -(-yz +/- r*sqrt(zz + yy - rr)
- t/z = 1/(zz - rr) * (yz -/+ r*sqrt(yy + zz - rr)
+ t/z = -1/(rr - zz) * -(-yz +/- R*sqrt(zz + yy - rr)
+ t/z = 1/(zz - rr) * (yz -/+ R*sqrt(yy + zz - rr)
 
-  t/z = 1/(zz - rr) * (yz -/+ r*sqrt(yy + zz - rr)
+  t/z = 1/(zz - rr) * (yz -/+ R*sqrt(yy + zz - rr)
   den = zz - rr
-  sqr = r * sqrt(yy + den)
+  sqr = R * sqrt(yy + den)
 
   t/z = 1/den * (yz -/+ sqr)
   s/fl = t/z
@@ -72,10 +72,10 @@ bool computeSSB(RectI &bounds, const vec3 &pos, f32 r, f32 focal_length, const D
         // So half of its height is 1 while half of its width is the aspect ratio (width / height).
 
         // Compute the dimensions of a proportionally-scaled image plane situated at distance 'z' instead of 'fl'
-        // h : Half of the height of a projection-plane placed at 'pos' and facing the camera:
-        // fl / 1 = abs(z) / h
-        // fl * h = abs(z)
-        // h = abs(z) / fl
+        // H : Half of the height of a projection-plane placed at 'pos' and facing the camera:
+        // fl / 1 = abs(z) / H
+        // fl * H = abs(z)
+        // H = abs(z) / fl
         f32 h = fabsf(z) / focal_length;
         top    = y + r;
         bottom = y - r;
@@ -84,8 +84,8 @@ bool computeSSB(RectI &bounds, const vec3 &pos, f32 r, f32 focal_length, const D
             return false;
 
         // w : Half of the width of a projection-plane placed at 'pos' and facing the camera:
-        // w / h = width / height
-        // w = h * width / height
+        // w / H = width / height
+        // w = H * width / height
         f32 w = h * dimensions.width_over_height;
         right  = x + r;
         left   = x - r;

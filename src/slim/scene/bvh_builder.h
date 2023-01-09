@@ -31,7 +31,7 @@ struct BVHPartition {
 
             // Keep popping from stack while is not empty
             while (top >= 0) {
-                // Pop h and l
+                // Pop H and l
                 end = stack[top--];
                 start = stack[top--];
 

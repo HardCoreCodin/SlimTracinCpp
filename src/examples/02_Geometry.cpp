@@ -14,31 +14,31 @@
 struct GeometryApp : SlimApp {
     // Viewport:
     Camera camera{
-            {-4, 15, -17},
+            {0, 7, -11},
             {-25 * DEG_TO_RAD, 0, 0}
     }, *cameras{&camera};
     Canvas canvas;
     Viewport viewport{canvas,&camera};
 
     // Scene:
-    Light key_light{ {20, 20, -5}, {1.0f, 1.0f, 0.65f}, 1.1f * 150.0f};
-    Light fill_light{ {-20, 20, -5}, {0.65f, 0.65f, 1.0f}, 1.2f * 150.0f};
-    Light rim_light{ {2, 5, 10}, {1.0f, 0.25f, 0.25f}, 0.9f * 150.0f};
+    Light key_light{ {10, 10, -5}, {1.0f, 1.0f, 0.65f}, 1.1f * 40.0f};
+    Light fill_light{ {-10, 10, -5}, {0.65f, 0.65f, 1.0f}, 0.9f * 40.0f};
+    Light rim_light{ {2, 5, 12}, {1.0f, 0.25f, 0.25f}, 1.2f * 40.0f};
     Light *lights{&key_light};
 
-    Material shapes_material{BRDF_CookTorrance, 0.8f, 0.0f, 0, 0, 0.7f, 0.1f};
+    Material shapes_material{BRDF_Lambert, 1.0f, 0.0f, 0, 0, {0.8f, 1.0f, 0.8f}};
     Material floor_material{BRDF_CookTorrance, 0.5f, 0.0f, MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
     Material *materials{&shapes_material};
 
-    char string_buffers[2][200];
-    String texture_files[2]{
-            String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
-            String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
-    };
-
-    Texture floor_albedo_map;
-    Texture floor_normal_map;
-    Texture *textures = &floor_albedo_map;
+//    char string_buffers[2][200];
+//    String texture_files[2]{
+//            String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
+//            String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
+//    };
+//
+//    Texture floor_albedo_map;
+//    Texture floor_normal_map;
+//    Texture *textures = &floor_albedo_map;
 
     Geometry box{{{-11, 8, 5}, {0.02f, 0.04f, 0.0f}, {3,4,5}}, GeometryType_Box};
     Geometry tet{{{-3, 6, 14}, {0.02f, 0.04f, 0.06f}, {4,3, 5}}, GeometryType_Tet};
@@ -47,7 +47,7 @@ struct GeometryApp : SlimApp {
     Geometry *geometries{&box};
 
     SceneCounts counts{4, 1, 3, 2, 2};
-    Scene scene{counts, nullptr, geometries, cameras, lights, materials, textures, texture_files};
+    Scene scene{counts, nullptr, geometries, cameras, lights, materials};
     Selection selection;
 
     RayTracer ray_tracer{scene, (u8)counts.geometries, scene.mesh_stack_size};

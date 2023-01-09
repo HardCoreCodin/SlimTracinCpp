@@ -15,11 +15,11 @@
 
 #ifdef __CUDACC__
     #ifndef NDEBUG
-        #include <stdio.h>
-        #include <stdlib.h>
+        #include <stdio.H>
+        #include <stdlib.H>
         inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true) {
             if (code != cudaSuccess) {
-                fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code) , file, line);
+                fprintf(stderr,"GPUassert: %s %s %d\N", cudaGetErrorString(code) , file, line);
                 if (abort) exit(code);
             }
         }
@@ -592,7 +592,22 @@ enum ColorID {
 
     DarkCyan,
     DarkMagenta,
-    DarkYellow
+    DarkYellow,
+
+    F0_Default,
+    F0_Water,
+    F0_Glass_Low,
+    F0_Glass_High,
+    F0_Plastic,
+    F0_PlasticHight,
+    F0_Ruby,
+
+    F0_Diamond,
+    F0_Iron,
+    F0_Copper,
+    F0_Gold,
+    F0_Aluminium,
+    F0_Silver
 };
 static ColorID MIP_LEVEL_COLORS[9] = {
         BrightRed,
@@ -733,101 +748,51 @@ struct Color {
     INLINE_XPU Color(enum ColorID color_id) : Color{0.0f} {
         switch (color_id) {
             case Black: break;
-            case White:
-                red = 1.0f;
-                green = 1.0f;
-                blue = 1.0f;
-                break;
-            case Grey:
-                red = 0.5f;
-                green = 0.5f;
-                blue = 0.5f;
-                break;
-            case DarkGrey:
-                red = 0.25f;
-                green = 0.25f;
-                blue = 0.25f;
-                break;
-            case BrightGrey:
-                red = 0.75f;
-                green = 0.75f;
-                blue = 0.75f;
-                break;
+            case White: *this = 1.0f; break;
+            case Grey: *this = 0.5f; break;
+            case DarkGrey: *this = 0.25f; break;
+            case BrightGrey: *this = 0.75f; break;
 
-            case Red:
-                red = 1.0f;
-                break;
-            case Green:
-                green = 1.0f;
-                break;
-            case Blue:
-                blue = 1.0f;
-                break;
+            case Red: red = 1.0f; break;
+            case Green: green = 1.0f; break;
+            case Blue: blue = 1.0f; break;
 
-            case DarkRed:
-                red = 0.5f;
-                break;
-            case DarkGreen:
-                green = 0.5f;
-                break;
-            case DarkBlue:
-                blue = 0.5f;
-                break;
+            case DarkRed: red = 0.5f; break;
+            case DarkGreen: green = 0.5f; break;
+            case DarkBlue: blue = 0.5f; break;
 
-            case DarkCyan:
-                green = 0.5f;
-                blue = 0.5f;
-                break;
-            case DarkMagenta:
-                red = 0.5f;
-                blue = 0.5f;
-                break;
-            case DarkYellow:
-                red = 0.5f;
-                green = 0.5f;
-                break;
+            case DarkCyan: green = 0.5f; blue = 0.5f; break;
+            case DarkMagenta: red = 0.5f; blue = 0.5f; break;
+            case DarkYellow: red = 0.5f; green = 0.5f; break;
 
-            case BrightRed:
-                red = 1.0f;
-                green = 0.5f;
-                blue = 0.5f;
-                break;
-            case BrightGreen:
-                red = 0.5f;
-                green = 1.0f;
-                blue = 0.5f;
-                break;
-            case BrightBlue:
-                red = 0.5f;
-                green = 0.5f;
-                blue = 1.0f;
-                break;
+            case BrightRed: red = 1.0f; green = 0.5f; blue = 0.5f; break;
+            case BrightGreen: red = 0.5f; green = 1.0f; blue = 0.5f; break;
+            case BrightBlue: red = 0.5f; green = 0.5f; blue = 1.0f; break;
 
-            case Cyan:
-                blue = 1.0f;
-                green = 1.0f;
-                break;
-            case Magenta:
-                red = 1.0f;
-                blue = 1.0f;
-                break;
-            case Yellow:
-                red = 1.0f;
-                green = 1.0f;
-                break;
+            case Cyan: blue = 1.0f; green = 1.0f; break;
+            case Magenta: red = 1.0f; blue = 1.0f; break;
+            case Yellow: red = 1.0f; green = 1.0f; break;
 
-            case BrightCyan:
-                green = 0.75f;
-                blue = 0.75f;
-                break;
-            case BrightMagenta:
-                red = 0.75f;
-                blue = 0.75f;
-                break;
-            case BrightYellow:
-                red = 0.75f;
-                green = 0.75f;
-                break;
+            case BrightCyan: green = 0.75f; blue = 0.75f; break;
+            case BrightMagenta: red = 0.75f; blue = 0.75f; break;
+            case BrightYellow: red = 0.75f; green = 0.75f; break;
+
+            // Dialectrics (Fresnel):
+            case F0_Default: *this = 0.04f; break;
+            case F0_Water: *this = 0.02f; break;
+            case F0_Plastic: *this = 0.03f; break;
+            case F0_PlasticHight: *this = 0.05f; break;
+            case F0_Glass_Low: *this = 0.03f; break;
+            case F0_Glass_High: *this = 0.08f; break;
+            case F0_Ruby: *this = 0.08f; break;
+            case F0_Diamond: *this = 0.17f; break;
+
+            // Conductors (Fresnel):
+            case F0_Iron: red = 0.56f; green = 0.57f; blue = 0.58f; break;
+            case F0_Copper: red = 0.95f; green = 0.64f; blue = 0.54f; break;
+            case F0_Gold: red = 1.0f; green = 0.71f; blue = 0.29f; break;
+            case F0_Aluminium: red = 0.91f; green = 0.92f; blue = 0.92f; break;
+            case F0_Silver: red = 0.95f; green = 0.93f; blue = 0.88f; break;
         }
     }
 

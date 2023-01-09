@@ -116,9 +116,6 @@ struct Ray {
     }
 
     INLINE_XPU BoxSide hitsDefaultBox(RayHit &hit, bool is_transparent = false) const {
-        if (pixel_coords.x == 300 && pixel_coords.y == 200 && depth == 2)  {
-            int a = pixel_coords.x;
-        }
         vec3 signed_rcp{faces};
         signed_rcp *= direction_reciprocal;
         vec3 near_t{scaled_origin - signed_rcp};

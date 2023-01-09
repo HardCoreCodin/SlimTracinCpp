@@ -4,159 +4,148 @@
 #include "../core/texture.h"
 #include "../scene/material.h"
 
-
-struct Shaded : RayHit {
-    Color albedo = White;
-    vec3 V, reflected_direction, refracted_direction, light_direction, emissive_quad_vertices[4];
-    f32 light_distance, light_distance_squared, NdotL, NdotV, R0, IOR, IOR2 = IOR_AIR;
-
+struct Sampler {
+    const RayHit &hit;
+    const Texture *textures = nullptr;
     Material *material = nullptr;
-    Geometry *geometry = nullptr;
 
-    INLINE_XPU const Shaded& operator=(const RayHit &hit) {
-        *((RayHit*)(this)) = hit;
-        return *this;
+    Sampler(const RayHit &hit, const Texture *textures, Material *material = nullptr) : hit{hit}, textures{textures}, material{material} {}
+
+    INLINE_XPU static Color sample(const Material &material, u8 slot, const Texture *textures, vec2 uv, f32 uv_coverage) {
+        return (textures && material.texture_count > slot) ? textures[material.texture_ids[slot]].sample(uv.u, uv.v, uv_coverage).color : Black;
     }
 
-    INLINE_XPU static f32 distanceToColor(f32 distance) {                                     return 4.0f / distance; }
-    INLINE_XPU static vec3 directionAndDistanceToColor(const vec3 &direction, f32 distance) { return (direction + 1.0f) * distanceToColor(distance); }
-    INLINE_XPU static vec3 directionToColor(const vec3 &direction) {                          return (direction + 1.0f) / 2.0f; }
+    INLINE_XPU Color sample(const Texture &texture) const { return texture.sample(hit.uv.u, hit.uv.v, hit.uv_coverage).color; }
+    INLINE_XPU Color sample(u8 texture_slot) const { return sample(*material, texture_slot, textures, hit.uv, hit.uv_coverage); }
+    INLINE_XPU Color sampleAlbedo() const { return sample(0); }
+    INLINE_XPU Color sampleNormal() const { return sample(1); }
+    INLINE_XPU vec3 sampleNormal(const vec3 &normal) const { return rotateNormal(normal, sampleNormal(), material->normal_magnitude); }
+};
 
-    INLINE_XPU Color getColorByDirection(const vec3 &direction) {            return directionToColor(direction).toColor(); }
-    INLINE_XPU Color getColorByDirectionAndDistance(const vec3 &direction) { return directionAndDistanceToColor(direction, distance).toColor(); }
-    INLINE_XPU Color getColorByDistance() {                                  return distanceToColor(distance); }
-    INLINE_XPU Color getColorByUV() {                                        return {uv.u, uv.v, 1.0f}; }
-    INLINE_XPU Color getColorByMipLevel(const Texture &texture) {            return MIP_LEVEL_COLORS[texture.mipLevel(uv_coverage)]; }
 
-    INLINE_XPU static vec3 decodeNormal(const Color &color) {
-        return vec3{color.r, color.b, color.g}.scaleAdd(2.0f, -1.0f).normalized();
-    }
 
-    INLINE_XPU static quat getNormalRotation(vec3 N, f32 magnitude = 1.0f) {
-        // axis      = up ^ normal = [0, 1, 0] ^ [x, y, z] = [1*z - 0*y, 0*x - 0*z, 0*y - 1*x] = [z, 0, -x]
-        // cos_angle = up . normal = [0, 1, 0] . [x, y, z] = 0*x + 1*y + 0*z = y
-        // (Pre)Swizzle N.z <-> N.y
-        return quat::AxisAngle(vec3{N.z, 0, -N.x}.normalized(),  acosf(N.y) * magnitude);
-    }
+struct Shader {
+    Material *M;
+    Color F, albedo_from_map;
+    vec3 N, V, L, R, RF, H;
+    f32 Ld, Ld2, NdotL, NdotV, NdotH, HdotL, RdotL, IOR;
+    bool refracted = false;
 
-    INLINE_XPU static Color sample(const Material &material, u8 material_texture_slot, const Texture *textures, f32 u, f32 v, f32 uv_area) {
-        return material.texture_count > material_texture_slot ? textures[material.texture_ids[material_texture_slot]].sample(u, v, uv_area).color : Black;
-    }
+    INLINE_XPU void reset(Material &material, const vec3 &normal, const vec3 &direction, bool from_behind, const Color &sampled_albedo = White) {
+        M = &material;
+        V = -direction;
+        N = normal;
+        R = direction.reflectedAround(N);
+        NdotV = clampedValue(N.dot(V));
+        albedo_from_map = sampled_albedo;
 
-    INLINE_XPU static quat convertNormalSampleToRotation(const Color &normal_sample, f32 magnitude) {
-        vec3 N = decodeNormal(normal_sample);
-        return getNormalRotation(N, magnitude);
-    }
+        refracted = material.isRefractive();
+        if (refracted) {
+            IOR = from_behind ? (material.IOR / IOR_AIR) : (IOR_AIR / material.IOR);
+            f32 c = IOR*IOR * (1.0f - (NdotV * NdotV));
+            refracted = c < 1.0f;
+            RF = refracted ? normal.scaleAdd(IOR * NdotV - sqrtf(1 - c), direction * IOR).normalized() : R;
+        }
 
-    INLINE_XPU static vec3 rotateNormal(const vec3 &normal, const Color &normal_sample, f32 magnitude) {
-         return convertNormalSampleToRotation(normal_sample, magnitude) * normal;
-    }
-
-    INLINE_XPU f32 ggxNDF(f32 roughness_squared, f32 NdotH) { // Trowbridge-Reitz:
-        f32 demon = NdotH * NdotH * (roughness_squared - 1.0f) + 1.0f;
-        return ONE_OVER_PI * roughness_squared / (demon * demon);
-    }
-
-    INLINE_XPU f32 ggxSmithSchlick(f32 roughness) {
-        f32 k = roughness * 0.5f; // Approximation from Karis (UE4)
-//    f32 k = roughness + 1.0f;
-//    k *= k * 0.125f;
-        f32 one_minus_k = 1.0f - k;
-        f32 denom = fast_mul_add(NdotV, one_minus_k, k);
-        f32 result = NdotV / fmaxf(denom, EPS);
-        denom = fast_mul_add(NdotL, one_minus_k, k);
-        result *= NdotL / fmaxf(denom, EPS);
-        return result;
-    }
-
-    INLINE_XPU f32 ggxFresnelSchlick(f32 LdotH) {
-        return R0 + (1.0f - R0) * powf(1.0f - LdotH, 5.0f);
-    }
-
-    INLINE_XPU Color sample(const Texture &texture) const {
-        return texture.sample(uv.u, uv.v, uv_coverage).color;
-    }
-
-    INLINE_XPU Color sample(const Texture *textures, u8 material_texture_slot) const {
-        return material->texture_count > material_texture_slot ? sample(textures[material->texture_ids[material_texture_slot]]) : Black;
-    }
-
-    INLINE_XPU Color sampleAlbedo(const Texture *textures) const {
-        return sample(textures, 0);
-    }
-
-    INLINE_XPU Color sampleNormal(const Texture *textures) const {
-        return sample(textures, 1);
-    }
-
-    INLINE_XPU quat convertNormalSampleToRotation(const Color &normal_sample) const {
-        return convertNormalSampleToRotation(normal_sample, material->normal_magnitude);
-    }
-
-    INLINE_XPU vec3 rotateNormal(const vec3 &normal, const Color &normal_sample) const {
-        return rotateNormal(normal, normal_sample, material->normal_magnitude);
-    }
-
-    INLINE_XPU void setLight(const Light &light) {
-        if (light.is_directional) {
-            light_distance = light_distance_squared = INFINITY;
-            light_direction = -light.position_or_direction;
+        if (M->brdf == BRDF_CookTorrance) {
+            // Metals have no albedo color, and so typically in PBR the albedo component is re-purposed to be used for
+            // the specular color of the reflective metal, represents the reflected color at a zero angle (F0).
+            // So if a metalic material is textured, it can encode F0 values per-texel in the albedo map, to be used
+            // instead of the constant material parameter, and so based on metalness the kd (albedo sample) is take.
+            // Similarly, Kd is lerped towards black by metalness, to nullify the diffuse contributions (for metals).
+//            F0 = material.F0.lerpTo(Kd, material.metalness);
+//            Kd = Kd.lerpTo(Black, material.metalness);
+            // This allows for layered material containing both metalic and dialectric surfaces using a single texture.
+            // When 'shadeFromLight()' below is invoked for a material with the Cook Torrance BRDF, it assumes that for
+            // metalic materials the F0 will contain the specular color, and so stored the result in Ks.
         } else {
-            light_direction = light.position_or_direction - position;
-            light_distance_squared = light_direction.squaredLength();
-            light_distance = sqrtf(light_distance_squared);
-            light_direction /= light_distance;
+            // When not using the Cook-Torrance BRDF, F0 is computed from the index of refraction.
+//            IOR2 = 1.0f / IOR;
+//            R0 = IOR - IOR2;
+//            R0 /= IOR + IOR2;
+//            R0 *= R0;
         }
-        NdotL = clampedValue(normal.dot(light_direction));
     }
 
-    INLINE_XPU Color shadeClassic(const Color &diffuse, f32 specular_factor, f32 exponent) {
-        f32 shininess = 1.0f - material->roughness;
-        specular_factor = NdotL * powf(specular_factor,exponent * shininess) * shininess;
-        return material->reflectivity.scaleAdd(specular_factor, diffuse);
+    INLINE_XPU Color fr(const Color& Kd, f32 Fd, const Color &Ks, f32 Fs) {
+        // The reflectance portion of the reflectance equation with Cook Torrance:
+        // Kd*Fd + Ks*Fs (FMA used here for performance)
+        return Kd.scaleAdd(Fd, Ks * Fs);
     }
 
-    INLINE_XPU Color radianceFraction() {
-        Color diffuse = albedo * (material->roughness * NdotL * ONE_OVER_PI);
+    INLINE_XPU Color Li(const Light &light) {
+        return light.color * (light.intensity / Ld2);
+    }
 
-        if (material->brdf == BRDF_Lambert) return diffuse;
-        if (material->brdf == BRDF_Phong) {
-            f32 RdotL = clampedValue(reflected_direction.dot(light_direction));
-            return RdotL ? shadeClassic(diffuse, RdotL, 4.0f) : diffuse;
+    INLINE_XPU void shadeFromLight(const Light &light, Color &color) {
+        Color Kd = M->albedo * albedo_from_map * M->roughness;
+        Color Ks = M->reflectivity;
+        f32 Fd = ONE_OVER_PI;
+        f32 Fs = 1.0f;
+
+        // Compute specular component coefficient:
+        if (M->brdf == BRDF_Phong) {
+            RdotL = clampedValue(R.dot(L));
+            // If the light is perpendicular-to/has-obtuse-angle-towards the reflected direction, the light is hitting
+            // the surface from behind the viewing direction, so no specular contribution should be accounted for.
+            if (RdotL > 0.0f)
+                Fs = classicSpecularFactor(1.0f - M->roughness, RdotL, 4.0f);
+            else
+                Ks = 0.0f;
+        } else {
+            // Both Blinn and Cook-Torrance require the half vector and the cosine of its angle to the normal direction:
+            H = (L + V).normalized();
+            NdotH = N.dot(H);
+            // Note: If the half vector is perpendicular to the normal, the light aims directly opposite to the normal.
+            // If the half vector has obtuse angle to the normal, the light aims away from the normal.
+            // In either cases, the cosine of the normal and the light would also been zero/negative.
+            // That means the code would never even get here, because this is checked for before.
+            // Because of that, there is no need for a check the angle between the normal and the half vector
+            // There is also no need to clamp the cosine, for the same reason.
+
+//            NdotH = clampedValue(N.dot(H);
+//            if (NdotH > 0.0f) {
+            if (M->brdf == BRDF_CookTorrance) {
+                // if (NdotV != 0.0f) {
+                // If the viewing direction is perpendicular to the normal, no light can reflect
+                // Both the numerator and denominator would evaluate to 0 in this case, resulting in NaN
+                // Note: This should not be necessary to check for, because rays would miss in that scenario,
+                // so the code should never even get to this point.
+
+                // If roughness is 0 then the NDF (and hence the entire brdf) evaluates to 0
+                // Otherwise, a negative roughness makes no sense logically and would be a user-error
+                if (M->roughness > 0.0f) {
+                    HdotL = clampedValue(H.dot(L));
+                    Ks = cookTorrance(M->roughness, NdotL, NdotV, HdotL, NdotH, M->reflectivity, F);
+                } else
+                    Ks = 0.0f;
+
+                Kd = M->albedo * albedo_from_map * (1.0f - F) * (1.0f - M->metalness);
+            } else // brdf == BRDF_Blinn
+                Fs = classicSpecularFactor(1.0f - M->roughness, NdotH, 16.0f);
         }
 
-        vec3 H = (light_direction + V).normalized();
-        f32 NdotH = clampedValue(normal.dot(H));
-        if (material->brdf == BRDF_Blinn ? !NdotH : (!NdotV || (!material->roughness && NdotH == 1.0f)))
-            return diffuse;
-
-        if (material->brdf == BRDF_Blinn)
-            return shadeClassic(diffuse, NdotH, 16.0f);
-
-        // Cook-Torrance BRDF:
-        f32 F = ggxFresnelSchlick(clampedValue(light_direction.dot(H)));
-        f32 D = ggxNDF(material->roughness * material->roughness, NdotH);
-        f32 G = ggxSmithSchlick(material->roughness);
-        return material->reflectivity.scaleAdd(F * D * G / (4.0f * NdotV), diffuse * (1.0f - F));
+        // The reflectance equation (FMA used here for performance):
+        // color += fr(p, L, V) * Li(p, L) * cos(w)
+        Color result = fr(Kd, Fd, Ks, Fs) * NdotL;
+        Color lighting = Li(light);
+        color = (
+                result.mulAdd(lighting,
+                            color)
+        );
     }
 
-    INLINE_XPU void prepareForShading(const Ray &ray, Material *materials, Texture *textures) {
-        material = materials + geometry->material_id;
-        albedo = material->albedo;
-        if (material->hasAlbedoMap()) albedo *= sampleAlbedo(textures);
-        if (material->hasNormalMap()) normal = rotateNormal(normal, sampleNormal(textures));
-
-        V = -ray.direction;
-        NdotV = clampedValue(normal.dot(V));
-
-        IOR = from_behind ? (material->IOR / IOR_AIR) : (IOR_AIR / material->IOR);
-        IOR2 = 1.0f / IOR;
-        R0 = IOR - IOR2;
-        R0 /= IOR + IOR2;
-        R0 *= R0;
-
-        reflected_direction = ray.direction.reflectedAround(normal);
-        f32 c = IOR*IOR * (1 - (NdotV * NdotV));
-        refracted_direction = c > 1 ? reflected_direction : (normal.scaleAdd(IOR * NdotV - sqrtf(1 - c), ray.direction * IOR)).normalized();
+    INLINE_XPU bool isFacingLight(const Light &light, const vec3 &P) {
+        if (light.is_directional) {
+            Ld = Ld2 = INFINITY;
+            L = -light.position_or_direction;
+        } else {
+            L = light.position_or_direction - P;
+            Ld2 = L.squaredLength();
+            Ld = sqrtf(Ld2);
+            L /= Ld;
+        }
+        NdotL = clampedValue(L.dot(N));
+        return NdotL > 0.0f;
     }
 };

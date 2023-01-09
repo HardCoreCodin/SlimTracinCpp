@@ -407,7 +407,7 @@ void setupScene(Scene *scene) {
         mirror->brdf = BRDF_Blinn;
         mirror->is = REFLECTIVE;
         mirror->reflectivity = getVec3Of(0.3f);
-        mirror->metallic = 1.0f;
+        mirror->metalness = 1.0f;
         mirror->roughness = 0.0f;
         mirror->use = NORMAL_MAP;
         mirror->texture_count = 2;
@@ -417,7 +417,7 @@ void setupScene(Scene *scene) {
         glass->brdf = BRDF_Blinn;
         glass->is = REFRACTIVE;
         glass->reflectivity = getVec3Of(0.3f);
-        glass->metallic = 1.0f;
+        glass->metalness = 1.0f;
         glass->roughness = 0.0f;
         glass->n1_over_n2 = IOR_AIR / IOR_GLASS;
         glass->n2_over_n1 = IOR_GLASS / IOR_AIR;
@@ -442,7 +442,7 @@ void setupScene(Scene *scene) {
         Material *material = scene->materials;
         for (u8 i = 0; i < MATERIAL_COUNT; i++, material++) {
             if (!(material->is & REFLECTIVE || material->is & REFRACTIVE))
-                material->reflectivity = lerpVec3(plastic, material->albedo, material->metallic);
+                material->reflectivity = lerpVec3(plastic, material->albedo, material->metalness);
         }
     }
 }

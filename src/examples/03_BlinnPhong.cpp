@@ -6,7 +6,7 @@
 
 
 // Or using the single-header file:
-//#include "../slim.h"
+//#include "../slim.H"
 
 struct ClassicShadersApp : SlimApp {
     // Viewport:
@@ -20,8 +20,8 @@ struct ClassicShadersApp : SlimApp {
 
     // Scene:
     Light key_light{ {10, 10, -5}, {1.0f, 1.0f, 0.65f}, 1.1f * 40.0f};
-    Light fill_light{ {-10, 10, -5}, {0.65f, 0.65f, 1.0f}, 1.2f * 40.0f};
-    Light rim_light{ {2, 5, 12}, {1.0f, 0.25f, 0.25f}, 0.9f * 40.0f};
+    Light fill_light{ {-10, 10, -5}, {0.65f, 0.65f, 1.0f}, 0.9f * 40.0f};
+    Light rim_light{ {2, 5, 12}, {1.0f, 0.25f, 0.25f}, 1.2f * 40.0f};
     Light *lights{&key_light};
 
     enum MATERIAL {
@@ -108,13 +108,13 @@ struct ClassicShadersApp : SlimApp {
             updateSelectionInHUD();
         }
 
-        quat rot = quat::AxisAngle(rotation.axis, delta_time * 10.0f);
-        for (u8 i = 0; i < scene.counts.geometries; i++) {
-            Geometry &geo = geometries[i];
-
-            if (geo.type != GeometryType_Quad && !(controls::is_pressed::alt && &geo == selection.geometry))
-                geo.transform.rotation = (geo.transform.rotation * rot).normalized();
-        }
+//        quat rot = quat::AxisAngle(rotation.axis, delta_time * 10.0f);
+//        for (u8 i = 0; i < scene.counts.geometries; i++) {
+//            Geometry &geo = geometries[i];
+//
+//            if (geo.type != GeometryType_Quad && !(controls::is_pressed::alt && &geo == selection.geometry))
+//                geo.transform.rotation = (geo.transform.rotation * rot).normalized();
+//        }
     }
 
     void OnKeyChanged(u8 key, bool is_pressed) override {

@@ -5,7 +5,7 @@
 #include "../slim/app.h"
 
 // Or using the single-header file:
-//#include "../slim.h"
+//#include "../slim.H"
 
 struct LightsApp : SlimApp {
     // Viewport:

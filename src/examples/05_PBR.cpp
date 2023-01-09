@@ -1,11 +1,13 @@
 #include "../slim/scene/selection.h"
+#include "../slim/draw/bvh.h"
+#include "../slim/draw/ssb.h"
 #include "../slim/draw/hud.h"
 #include "../slim/draw/selection.h"
 #include "../slim/renderer/raytracer.h"
 #include "../slim/app.h"
 
 // Or using the single-header file:
-//#include "../slim.h"
+//#include "../slim.H"
 
 #define GRID_SPACING 2.5f
 #define GRID_SIZE 7
@@ -38,8 +40,7 @@ struct PBRApp : SlimApp {
     // Drawing:
     f32 opacity = 0.2f;
 
-    bool draw_bvh = false;
-    bool draw_ssb = false;
+    bool draw_TLAS = false;
     bool antialias = false;
 
     // HUD:
@@ -55,16 +56,12 @@ struct PBRApp : SlimApp {
                         &antialias,
                         true};
     HUDLine Mode_hud_line{(char*)"Mode : ", (char*)"Beauty"};
-    HUDLine BVH_hud_line{(char*)"BVH : ",
-                         (char*)"On",
-                         (char*)"Off",
-                         &draw_bvh,
-                         true};
-    HUDLine SSB_hud_line{(char*)"SSB : ",
-                         (char*)"On",
-                         (char*)"Off",
-                         &draw_ssb,
-                         true};
+    HUDLine TLAS_hud_line{(char*)"TLAS : ", (char*)"BVH"};
+    HUDLine Draw_TLAS_hud_line{(char*)"Draw TLAS : ",
+                               (char*)"On",
+                               (char*)"Off",
+                               &draw_TLAS,
+                               true};
     HUDSettings hud_settings{6};
     HUD hud{hud_settings, &FPS_hud_line};
 
@@ -78,20 +75,31 @@ struct PBRApp : SlimApp {
                 geo.transform.position.x = ((f32)col - (GRID_SIZE_F / 2.0f)) * GRID_SPACING;
                 geo.transform.position.y = ((f32)row - (GRID_SIZE_F / 2.0f)) * GRID_SPACING;
                 geo.material_id = GRID_SIZE * row + col;
+
                 mat.brdf = BRDF_CookTorrance;
-                mat.metallic  = (f32)row / GRID_SIZE_F;
+
+                mat.metalness  = (f32)row / GRID_SIZE_F;
                 mat.roughness = (f32)col / GRID_SIZE_F;
-                mat.albedo = Color{0.5f, 0.0f, 0.0f};
-                mat.reflectivity = plastic.lerpTo(mat.albedo, mat.metallic);
                 mat.roughness = clampedValue(mat.roughness, 0.05f, 1.0f);
+
+                mat.albedo = Color{0.5f, 0.0f, 0.0f};
+                mat.reflectivity = plastic.lerpTo(mat.albedo, mat.metalness);
             }
         }
     }
 
     void OnRender() override {
+        static Transform transform;
         canvas.clear();
 
         ray_tracer.render(viewport);
+
+        if (draw_TLAS) {
+            if (ray_tracer.use_ssb)
+                drawSSB(scene, canvas);
+            else
+                drawBVH(scene.bvh, transform, viewport);
+        }
 
         if (controls::is_pressed::alt)
             drawSelection(selection, viewport, scene);
@@ -111,8 +119,8 @@ struct PBRApp : SlimApp {
     void OnKeyChanged(u8 key, bool is_pressed) override {
         Move &move = viewport.navigation.move;
         Turn &turn = viewport.navigation.turn;
-        if (key == 'X') turn.left     = is_pressed;
-        if (key == 'C') turn.right    = is_pressed;
+//        if (key == 'X') turn.left     = is_pressed;
+//        if (key == 'C') turn.right    = is_pressed;
         if (key == 'R') move.up       = is_pressed;
         if (key == 'F') move.down     = is_pressed;
         if (key == 'W') move.forward  = is_pressed;
@@ -121,9 +129,9 @@ struct PBRApp : SlimApp {
         if (key == 'D') move.right    = is_pressed;
         if (!is_pressed) {
             if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
-            if (key == 'H') draw_bvh = !draw_bvh;
-            if (key == 'B') draw_ssb = !draw_ssb;
+            if (key == 'B') draw_TLAS = !draw_TLAS;
             if (key == 'G') ray_tracer.use_gpu = !ray_tracer.use_gpu;
+            if (key == 'X') { ray_tracer.use_ssb = !ray_tracer.use_ssb; TLAS_hud_line.value.string = ray_tracer.use_ssb ? (char*)"SSB" : (char*)"BVH";}
             if (key == 'Z') { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
             if (key == '1') { ray_tracer.render_mode = RenderMode_Beauty; Mode_hud_line.value.string = (char*)"Beauty"; }
             if (key == '2') { ray_tracer.render_mode = RenderMode_Depth; Mode_hud_line.value.string = (char*)"Depth"; }
