@@ -21,22 +21,6 @@ struct PBRApp : SlimApp {
     Canvas canvas;
     Viewport viewport{canvas, &camera};
 
-    // Scene:
-    Light light1{ {+10, +10, -10}, White, 300};
-    Light light2{ {-10, +10, -10}, White, 300};
-    Light light3{ {+10, -20, -10}, White, 300};
-    Light light4{ {-10, -20, -10}, White, 300};
-    Light *lights{&light1};
-
-    Material materials[GRID_SIZE][GRID_SIZE];
-    Geometry geometries[GRID_SIZE][GRID_SIZE];
-
-    SceneCounts counts{OBJECT_COUNT, 1, 4, OBJECT_COUNT};
-    Scene scene{counts, nullptr, &geometries[0][0], &camera, lights, &materials[0][0]};
-    Selection selection;
-
-    RayTracer ray_tracer{scene, (u8)counts.geometries, scene.mesh_stack_size};
-
     // Drawing:
     f32 opacity = 0.2f;
 
@@ -65,6 +49,22 @@ struct PBRApp : SlimApp {
     HUDSettings hud_settings{6};
     HUD hud{hud_settings, &FPS_hud_line};
 
+    Selection selection;
+
+    // Scene:
+    Light light1{ {+10, +10, -10}, White, 300};
+    Light light2{ {-10, +10, -10}, White, 300};
+    Light light3{ {+10, -20, -10}, White, 300};
+    Light light4{ {-10, -20, -10}, White, 300};
+    Light *lights{&light1};
+
+    Material materials[GRID_SIZE][GRID_SIZE];
+    Geometry geometries[GRID_SIZE][GRID_SIZE];
+    SceneCounts counts{OBJECT_COUNT, 1, 4, OBJECT_COUNT};
+    Scene scene{counts, nullptr, &geometries[0][0],
+                &camera, lights, &materials[0][0]};
+    RayTracer ray_tracer{scene, (u8)counts.geometries, scene.mesh_stack_size};
+
     PBRApp() {
         Color plastic{0.04f};
         for (u8 row = 0; row < GRID_SIZE; row++) {
@@ -75,13 +75,10 @@ struct PBRApp : SlimApp {
                 geo.transform.position.x = ((f32)col - (GRID_SIZE_F / 2.0f)) * GRID_SPACING;
                 geo.transform.position.y = ((f32)row - (GRID_SIZE_F / 2.0f)) * GRID_SPACING;
                 geo.material_id = GRID_SIZE * row + col;
-
                 mat.brdf = BRDF_CookTorrance;
-
-                mat.metalness  = (f32)row / GRID_SIZE_F;
+                mat.metalness = (f32)row / GRID_SIZE_F;
                 mat.roughness = (f32)col / GRID_SIZE_F;
                 mat.roughness = clampedValue(mat.roughness, 0.05f, 1.0f);
-
                 mat.albedo = Color{0.5f, 0.0f, 0.0f};
                 mat.reflectivity = plastic.lerpTo(mat.albedo, mat.metalness);
             }

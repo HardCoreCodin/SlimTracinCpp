@@ -17,12 +17,23 @@ struct LightsApp : SlimApp {
     Viewport viewport{canvas,&camera};
 
     // Scene:
-    Light key_light{ {20, 20, -5}, {1.0f, 1.0f, 0.65f}, 1.1f * 150.0f};
-    Light fill_light{ {-20, 20, -5}, {0.65f, 0.65f, 1.0f}, 1.2f * 150.0f};
-    Light rim_light{ {2, 5, 10}, {1.0f, 0.25f, 0.25f}, 0.9f * 150.0f};
+    Light key_light{
+        {20, 20, -5},
+        {1.0f, 1.0f, 0.65f},
+        1.1f * 150.0f};
+    Light fill_light{
+        {-20, 20, -5},
+        {0.65f, 0.65f, 1.0f},
+        1.2f * 150.0f
+    };
+    Light rim_light{
+        {2, 5, 10},
+        {1.0f, 0.25f, 0.25f},
+        0.9f * 150.0f
+    };
     Light *lights{&key_light};
 
-    Material floor_material{BRDF_CookTorrance, 0.5f, 0.0f, MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
+    Material floor_material{BRDF_CookTorrance, 0.2f, 0.0f, MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
     Material *materials{&floor_material};
 
     char string_buffers[2][200];
@@ -83,24 +94,20 @@ struct LightsApp : SlimApp {
         floor_material.texture_ids[1] = 1;
     }
 
-    void OnRender() override {
-        canvas.clear();
-
-        ray_tracer.render(viewport);
-
-        if (controls::is_pressed::alt)
-            drawSelection(selection, viewport, scene);
-
-        if (hud.enabled)
-            drawHUD(hud, canvas);
-
-        canvas.drawToWindow();
-    }
-
     void OnUpdate(f32 delta_time) override {
         FPS_hud_line.value = (i32)render_timer.average_frames_per_second;
         if (!mouse::is_captured) selection.manipulate(viewport, scene);
         if (!controls::is_pressed::alt) viewport.updateNavigation(delta_time);
+    }
+
+    void OnRender() override {
+        canvas.clear();
+
+        ray_tracer.render(viewport);
+        if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
+        if (hud.enabled) drawHUD(hud, canvas);
+
+        canvas.drawToWindow();
     }
 
     void OnKeyChanged(u8 key, bool is_pressed) override {

@@ -127,17 +127,12 @@ struct Canvas {
     }
 
     void drawToWindow() const {
-        u32 *content_value = window::content;
+        u32 *content = window::content;
         Pixel *pixel = pixels;
-        for (u16 y = 0; y < window::height; y++)
-            for (u16 x = 0; x < window::width; x++, content_value++) {
-                *content_value = getPixelContent(pixel);
-
-                if (antialias == SSAA)
-                    pixel += 4;
-                else
-                    pixel++;
-            }
+        u32 count = window::height * window::width;
+        u8 step = antialias == SSAA ? 4 : 1;
+        for (u32 i = 0; i < count; i++, content++, pixel += step)
+            *content = getPixelContent(pixel);
     }
 
     INLINE_XPU void setPixel(i32 x, i32 y, const Color &color, f32 opacity = 1.0f, f32 depth = 0, f32 z_top = 0, f32 z_bottom = 0, f32 z_right = 0) const {

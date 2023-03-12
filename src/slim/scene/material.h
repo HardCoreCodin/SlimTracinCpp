@@ -109,7 +109,7 @@ struct Material {
              u8 flags = 0,
              u8 texture_count = 0,
              const Color &albedo = 1.0f,
-             const Color &reflectivity = 1.0f,
+             const Color &reflectivity = F0_Default,
              const Color &emission = 0.0f,
              UV uv_repeat = 1.0f,
              f32 normal_magnitude = 1.0f,
@@ -131,8 +131,8 @@ struct Material {
     INLINE_XPU bool isEmissive() const { return flags & MATERIAL_IS_EMISSIVE; }
     INLINE_XPU bool isReflective() const { return flags & MATERIAL_IS_REFLECTIVE; }
     INLINE_XPU bool isRefractive() const { return flags & MATERIAL_IS_REFRACTIVE; }
-    INLINE_XPU bool isTextured() const { return texture_count && flags & (MATERIAL_HAS_ALBEDO_MAP | MATERIAL_HAS_NORMAL_MAP); }
-    INLINE_XPU bool hasAlbedoMap() const { return texture_count && flags & MATERIAL_HAS_ALBEDO_MAP; }
-    INLINE_XPU bool hasNormalMap() const { return texture_count && flags & MATERIAL_HAS_NORMAL_MAP; }
+    INLINE_XPU bool isTextured() const { return texture_count && (flags & (MATERIAL_HAS_ALBEDO_MAP | MATERIAL_HAS_NORMAL_MAP)); }
+    INLINE_XPU bool hasAlbedoMap() const { return texture_count && (flags & MATERIAL_HAS_ALBEDO_MAP); }
+    INLINE_XPU bool hasNormalMap() const { return texture_count && (flags & MATERIAL_HAS_NORMAL_MAP); }
 };
 

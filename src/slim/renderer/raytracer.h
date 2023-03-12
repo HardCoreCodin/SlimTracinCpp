@@ -29,7 +29,7 @@ struct RayTracer : public SceneTracer {
     f32 squared_distance_to_projection_plane, z_depth;
     u32 max_depth = 4;
     bool use_gpu = false;
-    bool use_ssb = true;
+    bool use_ssb = false;
 
     INLINE_XPU RayTracer(Scene &scene, u32 *stack, u32 stack_size, u32 *mesh_stack, u32 mesh_stack_size, RenderMode render_mode = RenderMode_Beauty) :
             SceneTracer{scene, stack, stack_size, mesh_stack, mesh_stack_size}, lights_shader{scene.lights, scene.counts.lights}, render_mode{render_mode} {}
@@ -246,29 +246,22 @@ struct RayTracer : public SceneTracer {
                 _shadow_ray.depth++;
                 vec3 &next_ray_direction{hit_material->isRefractive() ? shader.RF : shader.R};
 
-//                Color next_ray_throughput{White};
-//                shader.refracted = shader.refracted && hit_material->isRefractive();
-//                if (shader.brdf == BRDF_CookTorrance) {
-//                    shader.cos_wi_h = clampedValue(shader.R.dot(shader.N));
-//                    shader.F = schlickFresnel(shader.cos_wi_h, shader.F0);
-//                    shader.D = ggxTrowbridgeReitz_D(shader.roughness, 1.0f);
-//                    shader.G = ggxSchlickSmith_G(shader.roughness, shader.cos_wi_h, shader.cos_wi_h);
-//                    shader.Ks = shader.F * (shader.D * shader.G
-//                                            /
-//                                            (4.0f * shader.cos_wi_h * shader.cos_wi_h)
-//                    );
-//
-//                    if (shader.refracted)
-//                        next_ray_throughput = shader.Ks;
-//                    else
-//                        next_ray_throughput -= shader.Ks;
-//                } else {
-//                    if (shader.refracted)
-//                        next_ray_throughput = hit_material->reflectivity;
-//                    else
-//                        next_ray_throughput -= hit_material->reflectivity;
-//                }
-//                throughput *= next_ray_throughput;
+                Color next_ray_throughput{White};
+                shader.refracted = shader.refracted && hit_material->isRefractive();
+                if (hit_material->brdf == BRDF_CookTorrance) {
+                    shader.F = schlickFresnel(clampedValue(shader.N.dot(shader.R)), hit_material->reflectivity);
+
+                    if (shader.refracted)
+                        next_ray_throughput -= shader.F;
+                    else
+                        next_ray_throughput = shader.F;
+                } else {
+                    if (shader.refracted)
+                        next_ray_throughput = hit_material->reflectivity;
+                    else
+                        next_ray_throughput -= hit_material->reflectivity;
+                }
+                throughput *= next_ray_throughput;
 
                 hit_geometry = findClosestGeometry(_world_hit.position, next_ray_direction, _world_hit);
                 if (hit_geometry) {
@@ -278,8 +271,8 @@ struct RayTracer : public SceneTracer {
                         break;
                     }
 
-                    if (hit_material->brdf != BRDF_CookTorrance)
-                        throughput *= hit_material->reflectivity;
+//                    if (hit_material->brdf != BRDF_CookTorrance)
+//                        throughput *= hit_material->reflectivity;
 
                     continue;
                 }

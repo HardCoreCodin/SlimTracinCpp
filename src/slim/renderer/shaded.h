@@ -67,17 +67,120 @@ struct Shader {
         }
     }
 
+    INLINE_XPU void shadeFromLight(const Light &light, Color &color) {
+        Color radiance_fraction{M->albedo * albedo_from_map};
+        if (M->brdf == BRDF_CookTorrance) {
+            radiance_fraction *= (1.0f - M->metalness) * ONE_OVER_PI;
+
+            if (NdotV > 0.0f) { // TODO: This should not be necessary to check for, because rays would miss in that scenario so the code should never even get to this point - and yet it seems like it does.
+                // If the viewing direction is perpendicular to the normal, no light can reflect
+                // Both the numerator and denominator would evaluate to 0 in this case, resulting in NaN
+
+                // If roughness is 0 then the NDF (and hence the entire brdf) evaluates to 0
+                // Otherwise, a negative roughness makes no sense logically and would be a user-error
+                if (M->roughness > 0.0f) {
+                    H = (L + V).normalized();
+                    NdotH = clampedValue(N.dot(H));
+                    HdotL = clampedValue(H.dot(L));
+                    Color Fs = cookTorrance(M->roughness, NdotL, NdotV, HdotL, NdotH, M->reflectivity, F);
+                    radiance_fraction = radiance_fraction.mulAdd(1.0f - F, Fs);
+                }
+            }
+        } else {
+            radiance_fraction *= M->roughness * ONE_OVER_PI;
+
+            if (M->brdf != BRDF_Lambert) {
+                f32 specular_factor, exponent;
+                if (M->brdf == BRDF_Phong) {
+                    exponent = 4.0f;
+                    specular_factor = clampedValue(R.dot(L));
+                } else {
+                    exponent = 16.0f;
+                    specular_factor = clampedValue(N.dot((L + V).normalized()));;
+                }
+                if (specular_factor > 0.0f)
+                    radiance_fraction = M->reflectivity.scaleAdd(
+                            powf(specular_factor, exponent) * (1.0f - M->roughness),
+                            radiance_fraction);
+            }
+        }
+
+        // color += fr(p, L, V) * Li(p, L) * cos(w)
+        color = radiance_fraction.mulAdd(light.color * (NdotL * light.intensity / Ld2), color);
+    }
+
+    INLINE_XPU bool isFacingLight(const Light &light, const vec3 &P) {
+        if (light.is_directional) {
+            Ld = Ld2 = INFINITY;
+            L = -light.position_or_direction;
+        } else {
+            L = light.position_or_direction - P;
+            Ld2 = L.squaredLength();
+            Ld = sqrtf(Ld2);
+            L /= Ld;
+        }
+        NdotL = clampedValue(L.dot(N));
+        return NdotL > 0.0f;
+    }
+/*
     INLINE_XPU Color fr(const Color& Kd, f32 Fd, const Color &Ks, f32 Fs) {
         // The reflectance portion of the reflectance equation with Cook Torrance:
         // Kd*Fd + Ks*Fs (FMA used here for performance)
         return Kd.scaleAdd(Fd, Ks * Fs);
     }
 
-    INLINE_XPU Color Li(const Light &light) {
-        return light.color * (light.intensity / Ld2);
+    INLINE_XPU Color Li(const Light &light, f32 NdotL) {
+        return light.color * (NdotL * light.intensity / Ld2);
     }
 
-    INLINE_XPU void shadeFromLight(const Light &light, Color &color) {
+    INLINE_XPU Color shadeClassic(f32 specular_factor, f32 exponent) {
+        Color radiance_fraction{ M->albedo * albedo_from_map * (M->roughness * ONE_OVER_PI) };
+
+        // If the light is perpendicular-to/has-obtuse-angle-towards the reflected direction, the light is hitting
+        // the surface from behind the viewing direction, so no specular contribution should be accounted for.
+        return specular_factor ?
+               M->reflectivity.scaleAdd(powf(specular_factor, exponent) * (1.0f - M->roughness),
+                                        radiance_fraction
+               ) : radiance_fraction;
+    }
+
+    INLINE_XPU void shadeFromLight3(const Light &light, Color &color) {
+        if (M->brdf == BRDF_Phong)
+            RdotL = clampedValue(R.dot(L));
+        else if (M->brdf != BRDF_Lambert) {
+            H = (L + V).normalized();
+            NdotH = clampedValue(N.dot(H));
+        }
+
+        Color radiance_fraction;
+
+        switch (M->brdf) {
+            case BRDF_Lambert: radiance_fraction = shadeClassic(0.0f, 0.0f); break;
+            case BRDF_Phong: radiance_fraction = shadeClassic(RdotL, 4.0f); break;
+            case BRDF_Blinn: radiance_fraction = shadeClassic(NdotH, 16.0f); break;
+            default:
+                f32 Kd = ONE_OVER_PI * (1.0f - M->metalness);
+                radiance_fraction = M->albedo * albedo_from_map;
+                if (NdotV) { // TODO: This should not be necessary to check for, because rays would miss in that scenario so the code should never even get to this point - and yet it seems like it does.
+                    // If the viewing direction is perpendicular to the normal, no light can reflect
+                    // Both the numerator and denominator would evaluate to 0 in this case, resulting in NaN
+
+                    // If roughness is 0 then the NDF (and hence the entire brdf) evaluates to 0
+                    // Otherwise, a negative roughness makes no sense logically and would be a user-error
+                    if (M->roughness > 0.0f) {
+                        HdotL = clampedValue(H.dot(L));
+                        Color Fs = cookTorrance(M->roughness, NdotL, NdotV, HdotL, NdotH, M->reflectivity, F);
+                        radiance_fraction = radiance_fraction.mulAdd(Kd * (1.0f - F), Fs);
+                    } else radiance_fraction *= Kd;
+                } else radiance_fraction *= Kd;
+        }
+
+        // The reflectance equation (FMA used here for performance):
+        // color += fr(p, L, V) * Li(p, L) * cos(w)
+        color = radiance_fraction.mulAdd(Li(light, NdotL), color);
+    }
+
+    INLINE_XPU void shadeFromLight2(const Light &light, Color &color) {
         Color Kd = M->albedo * albedo_from_map * M->roughness;
         Color Ks = M->reflectivity;
         f32 Fd = ONE_OVER_PI;
@@ -117,6 +220,10 @@ struct Shader {
                 if (M->roughness > 0.0f) {
                     HdotL = clampedValue(H.dot(L));
                     Ks = cookTorrance(M->roughness, NdotL, NdotV, HdotL, NdotH, M->reflectivity, F);
+                    if (Ks.r >= 1.0f || Ks.g >= 1.0f || Ks.b >= 1.0f || Ks.r < 0.0f || Ks.g < 0.0f || Ks.b < 0.0f) {
+                        Ks = cookTorrance(M->roughness, NdotL, NdotV, HdotL, NdotH, M->reflectivity, F);
+//                        Ks = Color{clampedValue(Ks.r), clampedValue(Ks.g), clampedValue(Ks.b)}
+                    }
                 } else
                     Ks = 0.0f;
 
@@ -127,25 +234,12 @@ struct Shader {
 
         // The reflectance equation (FMA used here for performance):
         // color += fr(p, L, V) * Li(p, L) * cos(w)
-        Color result = fr(Kd, Fd, Ks, Fs) * NdotL;
-        Color lighting = Li(light);
+        Color result = fr(Kd, Fd, Ks, Fs);
+        Color lighting = Li(light, NdotL);
         color = (
                 result.mulAdd(lighting,
                             color)
         );
     }
-
-    INLINE_XPU bool isFacingLight(const Light &light, const vec3 &P) {
-        if (light.is_directional) {
-            Ld = Ld2 = INFINITY;
-            L = -light.position_or_direction;
-        } else {
-            L = light.position_or_direction - P;
-            Ld2 = L.squaredLength();
-            Ld = sqrtf(Ld2);
-            L /= Ld;
-        }
-        NdotL = clampedValue(L.dot(N));
-        return NdotL > 0.0f;
-    }
+*/
 };
