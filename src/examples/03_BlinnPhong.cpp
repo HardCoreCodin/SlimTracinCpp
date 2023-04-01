@@ -11,17 +11,28 @@
 struct ClassicShadersApp : SlimApp {
     // Viewport:
     Camera camera{
-//            {-4, 15, -17},
-            {0, 7, -11},
-            {-25 * DEG_TO_RAD, 0, 0}
+        .orientation = {-25 * DEG_TO_RAD, 0, 0},
+        .position = {0, 7, -11}
     }, *cameras{&camera};
     Canvas canvas;
-    Viewport viewport{canvas,&camera};
+    Viewport viewport{canvas, &camera};
 
     // Scene:
-    Light key_light{ {10, 10, -5}, {1.0f, 1.0f, 0.65f}, 1.1f * 40.0f};
-    Light fill_light{ {-10, 10, -5}, {0.65f, 0.65f, 1.0f}, 0.9f * 40.0f};
-    Light rim_light{ {2, 5, 12}, {1.0f, 0.25f, 0.25f}, 1.2f * 40.0f};
+    Light key_light{
+        .color = {1.0f, 1.0f, 0.65f},
+        .position_or_direction = {10, 10, -5},
+        .intensity = 1.1f * 40.0f
+    };
+    Light fill_light{
+        .color = {0.65f, 0.65f, 1.0f},
+        .position_or_direction = {-10, 10, -5},
+        .intensity = 1.2f * 40.0f
+    };
+    Light rim_light{
+        .color = {1.0f, 0.25f, 0.25f},
+        .position_or_direction = {2, 5, 12},
+        .intensity = 0.9f * 40.0f
+    };
     Light *lights{&key_light};
 
     enum MATERIAL {
@@ -32,52 +43,93 @@ struct ClassicShadersApp : SlimApp {
     };
 
     Material lambert_material{
-        BRDF_Lambert,
-        1.0f, 0.0f, 0, 0,
-        {0.8f, 1.0f, 0.8f}
+        .albedo = {0.8f, 1.0f, 0.8f},
+        .brdf = BRDF_Lambert,
     };
     Material phong_material{
-        BRDF_Phong,
-        0.5f, 0.0f, 0, 0,
-        {0.2f, 0.2f, 0.3f},
-        {1.0f, 1.0f, 0.4f}
+        .albedo = {0.2f, 0.2f, 0.3f},
+        .reflectivity = {1.0f, 1.0f, 0.4f},
+        .roughness = 0.5f,
+        .brdf = BRDF_Phong,
     };
     Material blinn_material{
-        BRDF_Blinn,
-        0.5f, 0.0f, 0, 0,
-        {1.0f, 0.3f, 1.0f},
-        {1.0f, 0.4f, 1.0f}
+        .albedo = {1.0f, 0.3f, 1.0f},
+        .reflectivity = {1.0f, 0.4f, 1.0f},
+        .roughness = 0.5f,
+        .brdf = BRDF_Blinn,
     };
-
     Material *materials{&lambert_material};
 
-    char string_buffers[2][200];
-    String texture_files[2]{
-            String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
-            String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
+    Geometry floor{
+        .transform = {
+            .scale = {40, 1, 40}
+        },
+        .type = GeometryType_Quad,
+        .material_id = MATERIAL_LAMBERT
     };
-
-    Geometry floor{{{}, {}, {40, 1, 40}}, GeometryType_Quad, MATERIAL_LAMBERT};
-    Geometry box{{{-9, 5, 3}, {0.02f, 0.04f, 0.0f}, {2.5f}}, GeometryType_Box, MATERIAL_PHONG};
-    Geometry tet{{{-3, 4, 12}, {0.02f, 0.04f, 0.06f}, {2.5f}}, GeometryType_Tet, MATERIAL_PHONG};
-    Geometry sphere{{{3, 4, 0}, {}, {2.5f}}, GeometryType_Sphere, MATERIAL_BLINN};
+    Geometry box{
+        .transform = {
+            .orientation = {0.02f, 0.04f, 0.0f},
+            .position = {-9, 5, 3},
+            .scale = 2.5f
+        },
+        .type = GeometryType_Box,
+        .material_id = MATERIAL_PHONG
+    };
+    Geometry tet{
+        .transform = {
+            .orientation = {0.02f, 0.04f, 0.06f},
+            .position = {-3, 4, 12},
+            .scale = 2.5f
+        },
+        .type = GeometryType_Tet,
+        .material_id = MATERIAL_PHONG
+    };
+    Geometry sphere{
+        .transform = {
+            .position = {3, 4, 0},
+            .scale = 2.5f
+        },
+        .type = GeometryType_Sphere,
+        .material_id = MATERIAL_BLINN
+    };
     Geometry *geometries{&floor};
 
-    SceneCounts counts{4, 1, 3, MATERIAL_COUNT};
-    Scene scene{counts, nullptr, geometries, cameras, lights, materials, nullptr, texture_files};
+    SceneCounts counts{
+        .geometries = 4,
+        .cameras = 1,
+        .lights = 3,
+        .materials = MATERIAL_COUNT
+    };
+    Scene scene{counts, nullptr, geometries, cameras, lights, materials};
     Selection selection;
 
     RayTracer ray_tracer{scene, (u8)counts.geometries, scene.mesh_stack_size};
 
-    // HUD:
-    HUDLine shader_line{(char*)"Shader : "};
-    HUDLine roughness_line{(char*)"Roughness : "};
-    HUDSettings hud_settings{5};
-    HUD hud{{2}, &shader_line};
-
     // Drawing:
     f32 opacity = 0.2f;
-    quat rotation{tet.transform.rotation};
+    quat rotation{tet.transform.orientation};
+
+    // HUD:
+    HUDLine shader_line{   (char*)"Surface   : "};
+    HUDLine roughness_line{(char*)"Roughness : "};
+    HUD hud{{2}, &shader_line};
+
+    void updateSelectionInHUD() {
+        char* shader = (char*)"";
+        if (selection.geometry) {
+            Geometry &geo = *selection.geometry;
+            switch (geo.material_id) {
+                case MATERIAL_BLINN: shader = (char*)"Blinn"; break;
+                case MATERIAL_PHONG: shader = (char*)"Phong"; break;
+                default:             shader = (char*)"Lambert"; break;
+            }
+            roughness_line.value = materials[geo.material_id].roughness;
+        } else
+            roughness_line.value.string.copyFrom((char*)"", 0);
+
+        shader_line.value.string.copyFrom(shader, 0);
+    }
 
     ClassicShadersApp() {
         updateSelectionInHUD();
@@ -96,11 +148,12 @@ struct ClassicShadersApp : SlimApp {
             Geometry &geo = geometries[i];
             if (!(controls::is_pressed::alt && &geo == selection.geometry) &&
                 geo.type != GeometryType_Quad)
-                geo.transform.rotation = (geo.transform.rotation * rot).normalized();
+                geo.transform.orientation = (geo.transform.orientation * rot).normalized();
         }
     }
 
     void OnRender() override {
+        static Transform transform;
         canvas.clear();
 
         ray_tracer.render(viewport);
@@ -136,22 +189,6 @@ struct ClassicShadersApp : SlimApp {
                 updateSelectionInHUD();
             }
         }
-    }
-
-    void updateSelectionInHUD() {
-        char* shader = (char*)"";
-        if (selection.geometry) {
-            Geometry &geo = *selection.geometry;
-            switch (geo.material_id) {
-                case MATERIAL_BLINN: shader = (char*)"Blinn"; break;
-                case MATERIAL_PHONG: shader = (char*)"Phong"; break;
-                default:             shader = (char*)"Lambert"; break;
-            }
-            roughness_line.value = materials[geo.material_id].roughness;
-        } else
-            roughness_line.value.string.copyFrom((char*)"", 0);
-
-        shader_line.value.string.copyFrom(shader, 0);
     }
 
     void OnWindowResize(u16 width, u16 height) override {

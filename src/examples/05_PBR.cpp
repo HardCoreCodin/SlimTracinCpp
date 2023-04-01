@@ -17,7 +17,9 @@
 
 struct PBRApp : SlimApp {
     // Viewport:
-    Camera camera{{0.0f, 0.0f, -11.0f}};
+    Camera camera{
+        .position = {0.0f, 0.0f, -11.0f}
+    };
     Canvas canvas;
     Viewport viewport{canvas, &camera};
 
@@ -52,10 +54,10 @@ struct PBRApp : SlimApp {
     Selection selection;
 
     // Scene:
-    Light light1{ {+10, +10, -10}, White, 300};
-    Light light2{ {-10, +10, -10}, White, 300};
-    Light light3{ {+10, -20, -10}, White, 300};
-    Light light4{ {-10, -20, -10}, White, 300};
+    Light light1{ .position_or_direction = {+10, +10, -10}, .intensity = 300};
+    Light light2{ .position_or_direction = {-10, +10, -10}, .intensity = 300};
+    Light light3{ .position_or_direction = {+10, -20, -10}, .intensity = 300};
+    Light light4{ .position_or_direction = {-10, -20, -10}, .intensity = 300};
     Light *lights{&light1};
 
     Material materials[GRID_SIZE][GRID_SIZE];
@@ -115,9 +117,6 @@ struct PBRApp : SlimApp {
 
     void OnKeyChanged(u8 key, bool is_pressed) override {
         Move &move = viewport.navigation.move;
-        Turn &turn = viewport.navigation.turn;
-//        if (key == 'X') turn.left     = is_pressed;
-//        if (key == 'C') turn.right    = is_pressed;
         if (key == 'R') move.up       = is_pressed;
         if (key == 'F') move.down     = is_pressed;
         if (key == 'W') move.forward  = is_pressed;

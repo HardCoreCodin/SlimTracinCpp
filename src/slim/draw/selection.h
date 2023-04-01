@@ -16,7 +16,7 @@ void drawSelection(Selection &selection, const Viewport &viewport, const Scene &
         } else {
             selection.xform.position = selection.light->position_or_direction;
             selection.xform.scale = selection.light->intensity / 64;
-            selection.xform.rotation = {};
+            selection.xform.orientation = {};
         }
 
         drawBox(box, selection.xform, viewport, Yellow, 0.5f, 0);

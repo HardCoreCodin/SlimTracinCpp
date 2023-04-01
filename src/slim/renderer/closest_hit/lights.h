@@ -8,8 +8,8 @@ INLINE_XPU vec3 getAreaLightVector(Transform &transform, vec3 P, vec3 *v) {
     if (sx == 0 || sz == 0)
         return 0.0f;
 
-    vec3 U{transform.rotation * vec3{sx < 0 ? -sx : sx, 0.0f, 0.0f}};
-    vec3 V{transform.rotation * vec3{0.0f, 0.0f ,sz < 0 ? -sz : sz}};
+    vec3 U{transform.orientation * vec3{sx < 0 ? -sx : sx, 0.0f, 0.0f}};
+    vec3 V{transform.orientation * vec3{0.0f, 0.0f , sz < 0 ? -sz : sz}};
     v[0] = transform.position - U - V;
     v[1] = transform.position + U - V;
     v[2] = transform.position + U + V;

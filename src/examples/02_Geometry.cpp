@@ -1,7 +1,5 @@
 #include "../slim/scene/selection.h"
 #include "../slim/draw/hud.h"
-#include "../slim/draw/bvh.h"
-#include "../slim/draw/ssb.h"
 #include "../slim/draw/selection.h"
 #include "../slim/renderer/raytracer.h"
 #include "../slim/app.h"
@@ -13,37 +11,46 @@
 struct GeometryApp : SlimApp {
     // Viewport:
     Camera camera{
-            {-4, 15, -17},
-            {-25 * DEG_TO_RAD, 0, 0}
+        .orientation = {-25 * DEG_TO_RAD, 0, 0},
+        .position = {-4, 15, -17}
     }, *cameras{&camera};
     Canvas canvas;
     Viewport viewport{canvas,&camera};
 
     // Scene:
     Light key_light{
-            {20, 20, -5},
-            {1.0f, 1.0f, 0.65f},
-            1.1f * 150.0f};
+        .color = {1.0f, 1.0f, 0.65f},
+        .position_or_direction = {20, 20, -5},
+        .intensity = 1.1f * 150.0f
+    };
     Light fill_light{
-            {-20, 20, -5},
-            {0.65f, 0.65f, 1.0f},
-            1.2f * 150.0f
+        .color = {0.65f, 0.65f, 1.0f},
+        .position_or_direction = {-20, 20, -5},
+        .intensity = 1.2f * 150.0f
     };
     Light rim_light{
-            {5, 5, 20},
-            {1.0f, 0.25f, 0.25f},
-            0.9f * 150.0f
+        .color = {1.0f, 0.25f, 0.25f},
+        .position_or_direction = {2, 5, 10},
+        .intensity = 0.9f * 150.0f
     };
     Light *lights{&key_light};
 
-    Material shapes_material{BRDF_Lambert, 1.0f, 0.0f, 0, 0, {0.8f, 1.0f, 0.8f}};
-    Material floor_material{BRDF_CookTorrance, 0.2f, 0.0f, MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
+    Material shapes_material{
+        .albedo = {0.8f, 1.0f, 0.8f},
+        .brdf = BRDF_Lambert
+    };
+    Material floor_material{
+        .roughness = 0.2f,
+        .flags = MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP,
+        .texture_count = 2,
+        .texture_ids = {0, 1}
+    };
     Material *materials{&shapes_material};
 
     char string_buffers[2][200];
     String texture_files[2]{
-            String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
-            String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
+        String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
+        String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
     };
 
     Texture floor_albedo_map;
@@ -51,38 +58,44 @@ struct GeometryApp : SlimApp {
     Texture *textures = &floor_albedo_map;
 
     Geometry box{
-        {
-            {-11, 8, 5},
-            {0.02f, 0.04f, 0.0f},
-            {3,4,5}
-            },
-        GeometryType_Box
+        .transform = {
+            .orientation = {0.02f, 0.04f, 0.0f},
+            .position = {-11, 8, 5},
+            .scale = {3, 4, 5}
+        },
+        .type = GeometryType_Box
     };
     Geometry tet{
-        {
-            {-3, 6, 14},
-            {0.02f, 0.04f, 0.06f},
-            {4,3, 5}
+        .transform = {
+            .orientation = {0.02f, 0.04f, 0.06f},
+            .position = {-3, 6, 14},
+            .scale = {4, 3, 5}
         },
-        GeometryType_Tet
+        .type = GeometryType_Tet
     };
     Geometry sphere{
-        {
-            {3, 6, 2}, {},
-            {5,4,3}
+        .transform = {
+            .position = {3, 6, 2},
+            .scale = {5, 4, 3}
         },
-        GeometryType_Sphere
+        .type = GeometryType_Sphere
     };
     Geometry floor{
-        {{}, {},
-         {40, 1, 40}
+        .transform = {
+            .scale = {40, 1, 40}
         },
-        GeometryType_Quad
+        .type = GeometryType_Quad,
+        .material_id = 1
     };
-
     Geometry *geometries{&box};
 
-    SceneCounts counts{4, 1, 3, 2, 2};
+    SceneCounts counts{
+        .geometries = 4,
+        .cameras = 1,
+        .lights = 3,
+        .materials = 2,
+        .textures = 2
+    };
     Scene scene{counts, nullptr, geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 
@@ -90,14 +103,7 @@ struct GeometryApp : SlimApp {
 
     // Drawing:
     f32 opacity = 0.2f;
-    quat rotation{tet.transform.rotation};
-
-    GeometryApp() {
-        floor.material_id = 1;
-        floor_material.texture_count = 2;
-        floor_material.texture_ids[0] = 0;
-        floor_material.texture_ids[1] = 1;
-    }
+    quat rotation{tet.transform.orientation};
 
     void OnUpdate(f32 delta_time) override {
         if (!mouse::is_captured) selection.manipulate(viewport, scene);
@@ -108,7 +114,7 @@ struct GeometryApp : SlimApp {
             Geometry &geo = geometries[i];
             if (!(controls::is_pressed::alt && &geo == selection.geometry) &&
                 geo.type != GeometryType_Quad)
-                geo.transform.rotation = (geo.transform.rotation * rot).normalized();
+                geo.transform.orientation = (geo.transform.orientation * rot).normalized();
         }
     }
 
@@ -133,17 +139,6 @@ struct GeometryApp : SlimApp {
     bool transparent = false;
 
     void OnKeyChanged(u8 key, bool is_pressed) override {
-        Move &move = viewport.navigation.move;
-        Turn &turn = viewport.navigation.turn;
-        if (key == 'Q') turn.left     = is_pressed;
-        if (key == 'E') turn.right    = is_pressed;
-        if (key == 'R') move.up       = is_pressed;
-        if (key == 'F') move.down     = is_pressed;
-        if (key == 'W') move.forward  = is_pressed;
-        if (key == 'S') move.backward = is_pressed;
-        if (key == 'A') move.left     = is_pressed;
-        if (key == 'D') move.right    = is_pressed;
-
         if (!is_pressed) {
             if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
             if (key == 'T' && selection.geometry) {
@@ -156,6 +151,17 @@ struct GeometryApp : SlimApp {
                 transparent = flags & GEOMETRY_IS_TRANSPARENT;
             }
         }
+
+        Move &move = viewport.navigation.move;
+        Turn &turn = viewport.navigation.turn;
+        if (key == 'Q') turn.left     = is_pressed;
+        if (key == 'E') turn.right    = is_pressed;
+        if (key == 'R') move.up       = is_pressed;
+        if (key == 'F') move.down     = is_pressed;
+        if (key == 'W') move.forward  = is_pressed;
+        if (key == 'S') move.backward = is_pressed;
+        if (key == 'A') move.left     = is_pressed;
+        if (key == 'D') move.right    = is_pressed;
     }
     void OnWindowResize(u16 width, u16 height) override {
         viewport.updateDimensions(width, height);

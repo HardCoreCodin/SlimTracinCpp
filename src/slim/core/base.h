@@ -488,11 +488,8 @@ struct OctantShifts {
 };
 
 template <class T>
-struct Orientation {
-    T rotation{};
-
-    INLINE_XPU Orientation() : rotation{T::Identity} {}
-    INLINE_XPU explicit Orientation(f32 x_radians, f32 y_radians = 0, f32 z_radians = 0) {
+struct Orientation : T {
+    INLINE_XPU Orientation(f32 x_radians = 0.0f, f32 y_radians = 0.0f, f32 z_radians = 0.0f) {
         setRotation(x_radians, y_radians, z_radians);
     }
 
@@ -544,15 +541,18 @@ struct Orientation {
         _update();
     }
 
+    INLINE_XPU void reset() {
+        this->setToIdentity();
+        x = y = z = 0.0f;
+    }
+
 protected:
-    f32 x, y, z;
+    f32 x = 0.0f, y = 0.0f, z = 0.0f;
 
     INLINE_XPU void _update() {
-        rotation = T{};
-        auto x_rot = T::RotationAroundX(x);
-        if (z != 0.0f) rotation = T::RotationAroundZ(z);
-        if (x != 0.0f) rotation *= T::RotationAroundX(x);
-        if (y != 0.0f) rotation *= T::RotationAroundY(y);
+        if (z != 0.0f) this->setToRotationAroundZ(z); else this->setToIdentity();
+        if (x != 0.0f) *this *= T::RotationAroundX(x);
+        if (y != 0.0f) *this *= T::RotationAroundY(y);
     }
 };
 

@@ -1,192 +1,259 @@
-#include "../SlimTracin/app.h"
-#include "../SlimTracin/core/time.h"
-#include "../SlimTracin/core/string.h"
-#include "../SlimTracin/viewport/navigation.h"
-#include "../SlimTracin/viewport/manipulation.h"
-#include "../SlimTracin/render/raytracer.h"
+#include "../slim/scene/selection.h"
+#include "../slim/draw/hud.h"
+#include "../slim/draw/bvh.h"
+#include "../slim/draw/ssb.h"
+#include "../slim/draw/selection.h"
+#include "../slim/renderer/raytracer.h"
+#include "../slim/app.h"
 
-enum LIGHT {
-    LIGHT_KEY,
-    LIGHT_RIM,
-    LIGHT_FILL,
-    LIGHT_COUNT
-};
-enum PRIM {
-    PRIM_FLOOR,
-    PRIM_DOG,
-    PRIM_DRAGON,
-    PRIM_MONKEY,
-    PRIM_COUNT
-};
-enum MESH {
-    MESH_DOG,
-    MESH_DRAGON,
-    MESH_MONKEY,
-    MESH_COUNT
-};
-void updateViewport(Viewport *viewport, Mouse *mouse) {
-    if (mouse->is_captured) {
-        if (mouse->moved)         orientViewport(viewport, mouse);
-        if (mouse->wheel_scrolled)  zoomViewport(viewport, mouse);
-    } else if (!(mouse->wheel_scrolled && app->controls.is_pressed.shift)) {
-        if (mouse->wheel_scrolled) dollyViewport(viewport, mouse);
-        if (mouse->moved) {
-            if (mouse->middle_button.is_pressed)
-                panViewport(viewport, mouse);
 
-            if (mouse->right_button.is_pressed &&
-                !app->controls.is_pressed.alt)
-                orbitViewport(viewport, mouse);
+// Or using the single-header file:
+//#include "../slim.h"
+
+struct MeshesApp : SlimApp {
+    // Viewport:
+    Camera camera{
+        .orientation = {-25 * DEG_TO_RAD, 0, 0},
+        .position = {-4, 15, -17}
+    }, *cameras{&camera};
+    Canvas canvas;
+    Viewport viewport{canvas,&camera};
+
+    // Scene:
+    Light key_light{
+        .color = {1.0f, 1.0f, 0.65f},
+        .position_or_direction = {20, 20, -5},
+        .intensity = 1.1f * 150.0f
+    };
+    Light fill_light{
+        .color = {0.65f, 0.65f, 1.0f},
+        .position_or_direction = {-20, 20, -5},
+        .intensity = 1.2f * 150.0f
+    };
+    Light rim_light{
+        .color = {1.0f, 0.25f, 0.25f},
+        .position_or_direction = {5, 5, 20},
+        .intensity = 0.9f * 150.0f
+    };
+    Light *lights{&key_light};
+
+    Material shapes_material{
+        .albedo = {0.8f, 1.0f, 0.8f},
+        .brdf = BRDF_Lambert
+    };
+    Material floor_material{
+        .roughness = 0.2f,
+        .brdf = BRDF_CookTorrance,
+        .flags = MATERIAL_HAS_NORMAL_MAP |
+                 MATERIAL_HAS_ALBEDO_MAP,
+        .texture_count = 2,
+        .texture_ids = {0, 1}
+    };
+    Material *materials{&shapes_material};
+
+    char string_buffers[2][200];
+    String texture_files[2]{
+        String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
+        String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
+    };
+
+    Texture floor_albedo_map;
+    Texture floor_normal_map;
+    Texture *textures = &floor_albedo_map;
+
+    Geometry dog{
+        .transform = {
+            .position = {4, 2, 8}
+        },
+        .type = GeometryType_Mesh
+    };
+    Geometry dragon{
+        .transform = {
+            .position = {0, 2, -1}
+        },
+        .type = GeometryType_Mesh,
+        .id = 1
+    };
+    Geometry monkey{
+        .transform = {
+            .position = {-4, 1.2f, 8}
+        },
+        .type = GeometryType_Mesh,
+        .id = 2
+    };
+    Geometry floor{
+        .transform = {
+            .scale = {40, 1, 40}
+        },
+        .type = GeometryType_Quad,
+        .material_id = 1
+    };
+    Geometry *geometries{&dog};
+
+    char strings[3][100] = {};
+    String mesh_files[3] = {
+        String::getFilePath((char*)"suzanne.mesh",strings[0],(char*)__FILE__),
+        String::getFilePath((char*)"dog.mesh" ,strings[1],(char*)__FILE__),
+        String::getFilePath((char*)"cube.mesh" ,strings[2],(char*)__FILE__)
+    };
+    Mesh meshes[3];
+
+    SceneCounts counts{
+        .geometries = 4,
+        .cameras = 1,
+        .lights = 3,
+        .materials = 2,
+        .textures = 2,
+        .meshes = 3
+    };
+    Scene scene{counts, nullptr, geometries, cameras, lights, materials, textures, texture_files,
+                meshes, mesh_files};
+    Selection selection;
+
+    RayTracer ray_tracer{scene, (u8)counts.geometries, scene.mesh_stack_size};
+
+    // Drawing:
+    f32 opacity = 0.2f;
+
+    bool draw_TLAS = false;
+    bool antialias = false;
+    bool transparent = false;
+
+    // HUD:
+    HUDLine FPS_hud_line{(char*)"FPS : "};
+    HUDLine GPU_hud_line{(char*)"GPU : ",
+                         (char*)"On",
+                         (char*)"Off",
+                         &ray_tracer.use_gpu,
+                         true};
+    HUDLine AA_hud_line{(char*)"SSAA: ",
+                        (char*)"On",
+                        (char*)"Off",
+                        &antialias,
+                        true};
+    HUDLine Mode_hud_line{(char*)"Mode : ", (char*)"Beauty"};
+    HUDLine TLAS_hud_line{(char*)"TLAS : ", (char*)"BVH"};
+    HUDLine Draw_TLAS_hud_line{(char*)"Draw TLAS : ",
+                               (char*)"On",
+                               (char*)"Off",
+                               &draw_TLAS,
+                               true};
+    HUDLine Transparent_hud_line{(char*)"Transparent : ",
+                                 (char*)"On",
+                                 (char*)"Off",
+                                 &transparent,
+                                 true};
+    HUDSettings hud_settings{7};
+    HUD hud{hud_settings, &FPS_hud_line};
+
+    void OnRender() override {
+        static Transform transform;
+        FPS_hud_line.value = (i32)render_timer.average_frames_per_second;
+        canvas.clear();
+
+        ray_tracer.render(viewport);
+
+        if (draw_TLAS) {
+            if (ray_tracer.use_ssb)
+                drawSSB(scene, canvas);
+            else {
+                for (u32 i = 0; i < scene.counts.geometries; i++)
+                    if (geometries[i].type == GeometryType_Mesh)
+                        drawBVH(scene.meshes[geometries[i].id].bvh, geometries[i].transform, viewport);
+                drawBVH(scene.bvh, transform, viewport);
+            }
         }
+
+        if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
+        if (hud.enabled) drawHUD(hud, canvas);
+
+        canvas.drawToWindow();
     }
-    if (viewport->navigation.turned ||
-        viewport->navigation.moved ||
-        viewport->navigation.zoomed)
-        updateSceneSSB(&app->scene, viewport);
-}
-void updateAndRender() {
-    Timer *timer = &app->time.timers.update;
-    Scene *scene       = &app->scene;
-    Viewport *viewport = &app->viewport;
-    Controls *controls = &app->controls;
-    Mouse *mouse = &controls->mouse;
-    bool prim_is_manipulated = controls->is_pressed.alt;
 
-    beginFrame(timer);
+    void OnUpdate(f32 delta_time) override {
         static float elapsed = 0;
-        elapsed += timer->delta_time;
+        elapsed += delta_time;
 
-        if (mouse->is_captured)
-            navigateViewport(viewport, timer->delta_time);
-        else
-            manipulateSelection(scene, viewport, controls);
-
-        if (!prim_is_manipulated)
-            updateViewport(viewport, mouse);
+        if (!mouse::is_captured) selection.manipulate(viewport, scene);
+        if (!controls::is_pressed::alt) viewport.updateNavigation(delta_time);
 
         f32 dog_scale    = sinf(elapsed * 1.5f) * 0.02f;
         f32 dragon_scale = sinf(elapsed * 2.5f) * 0.04f;
         f32 monkey_scale = sinf(elapsed * 2.5f + 1) * 0.05f;
-        Primitive *dog    = scene->primitives + PRIM_DOG;
-        Primitive *dragon = scene->primitives + PRIM_DRAGON;
-        Primitive *monkey = scene->primitives + PRIM_MONKEY;
 
-        dog->scale    = getVec3Of(0.4f + dog_scale);
-        dragon->scale = getVec3Of(0.4f - dragon_scale);
-        monkey->scale = getVec3Of(0.3f + monkey_scale);
-        dog->scale.y    += 2 * dog_scale;
-        dragon->scale.y += 2 * dragon_scale;
-        monkey->scale.y -= 2 * monkey_scale;
-        quat rot = getRotationAroundAxis(Vec3(0, 1, 0),
-                                         timer->delta_time * 0.015f);
-        if (!(prim_is_manipulated && dragon == scene->selection->primitive))
-            dragon->rotation = normQuat(mulQuat(dragon->rotation, rot));
+        dog.transform.scale = 0.4f + dog_scale;
+        dog.transform.scale.y += 2 * dog_scale;
+        dragon.transform.scale = 0.4f - dragon_scale;
+        dragon.transform.scale.y += 2 * dragon_scale;
+        monkey.transform.scale = 0.3f + monkey_scale;
+        monkey.transform.scale.y -= 2 * monkey_scale;
+
+        quat rot = quat::RotationAroundY(delta_time * 0.015f);
+        if (!(controls::is_pressed::alt && selection.geometry == &dragon))
+            dragon.transform.orientation *= rot;
+
         rot.amount *= -0.5f;
+        rot = rot.normalized();
+        if (!(controls::is_pressed::alt && selection.geometry == &monkey))
+            monkey.transform.orientation *= rot;
 
-        if (!(prim_is_manipulated && monkey == scene->selection->primitive))
-            monkey->rotation = normQuat(mulQuat(monkey->rotation, rot));
         rot.amount = -rot.amount;
-        if (!(prim_is_manipulated && dog == scene->selection->primitive))
-            dog->rotation = normQuat(mulQuat(dog->rotation, rot));
+        if (!(controls::is_pressed::alt && selection.geometry == &dog))
+            dog.transform.orientation *= rot;
+    }
 
-        uploadPrimitives(scene);
+    void OnKeyChanged(u8 key, bool is_pressed) override {
+        Move &move = viewport.navigation.move;
+        Turn &turn = viewport.navigation.turn;
+        if (key == 'Q') turn.left     = is_pressed;
+        if (key == 'E') turn.right    = is_pressed;
+        if (key == 'R') move.up       = is_pressed;
+        if (key == 'F') move.down     = is_pressed;
+        if (key == 'W') move.forward  = is_pressed;
+        if (key == 'S') move.backward = is_pressed;
+        if (key == 'A') move.left     = is_pressed;
+        if (key == 'D') move.right    = is_pressed;
+        if (!is_pressed) {
+            if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
+            if (key == 'B') draw_TLAS = !draw_TLAS;
+            if (key == 'G') ray_tracer.use_gpu = !ray_tracer.use_gpu;
+            if (key == 'X') { ray_tracer.use_ssb = !ray_tracer.use_ssb; TLAS_hud_line.value.string = ray_tracer.use_ssb ? (char*)"SSB" : (char*)"BVH";}
+            if (key == 'Z') { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
+            if (key == '1') { ray_tracer.render_mode = RenderMode_Beauty; Mode_hud_line.value.string = (char*)"Beauty"; }
+            if (key == '2') { ray_tracer.render_mode = RenderMode_Depth; Mode_hud_line.value.string = (char*)"Depth"; }
+            if (key == '3') { ray_tracer.render_mode = RenderMode_Normals; Mode_hud_line.value.string = (char*)"Normals"; }
+            if (key == '4') { ray_tracer.render_mode = RenderMode_NormalMap; Mode_hud_line.value.string = (char*)"Normal Maps"; }
+            if (key == '5') { ray_tracer.render_mode = RenderMode_MipLevel; Mode_hud_line.value.string = (char*)"Mip Level"; }
+            if (key == '6') { ray_tracer.render_mode = RenderMode_UVs; Mode_hud_line.value.string = (char*)"UVs"; }
+            if (key == 'T' && selection.geometry) {
+                u8 &flags = selection.geometry->flags;
+                if (flags & GEOMETRY_IS_TRANSPARENT)
+                    flags &= ~GEOMETRY_IS_TRANSPARENT;
+                else
+                    flags |= GEOMETRY_IS_TRANSPARENT;
 
-        beginDrawing(viewport);
-            renderScene(scene, viewport);
-            drawSelection(scene, viewport, controls);
-        endDrawing(viewport);
-    endFrame(timer, mouse);
-}
-void onMouseButtonDown(MouseButton *mouse_button) {
-    app->controls.mouse.pos_raw_diff = Vec2i(0, 0);
-}
-void onMouseDoubleClicked(MouseButton *mouse_button) {
-    Mouse *mouse = &app->controls.mouse;
-    if (mouse_button == &mouse->left_button) {
-        mouse->is_captured = !mouse->is_captured;
-        mouse->pos_raw_diff = Vec2i(0, 0);
-        app->platform.setCursorVisibility(!mouse->is_captured);
-        app->platform.setWindowCapture(    mouse->is_captured);
+                transparent = flags & GEOMETRY_IS_TRANSPARENT;
+//                uploadMaterials(scene);
+            }
+        }
     }
-}
-void onKeyChanged(u8 key, bool is_pressed) {
-    NavigationMove* move = &app->viewport.navigation.move;
-    if (key == 'R') move->up       = is_pressed;
-    if (key == 'F') move->down     = is_pressed;
-    if (key == 'W') move->forward  = is_pressed;
-    if (key == 'A') move->left     = is_pressed;
-    if (key == 'S') move->backward = is_pressed;
-    if (key == 'D') move->right    = is_pressed;
-}
-void setupScene(Scene *scene) {
-    { // Setup Camera:
-        Camera *camera = scene->cameras;
-        camera->transform.position.y = 7;
-        camera->transform.position.z = -11;
-        rotateXform3(&camera->transform, 0, -0.2f, 0);
+    void OnWindowResize(u16 width, u16 height) override {
+        viewport.updateDimensions(width, height);
+        canvas.dimensions.update(width, height);
     }
-    { // Setup Lights:
-        scene->ambient_light.color = Vec3(0.004f, 0.004f, 0.007f);
-        Light *key = scene->lights + LIGHT_KEY;
-        Light *rim = scene->lights + LIGHT_RIM;
-        Light *fill = scene->lights + LIGHT_FILL;
-        key->intensity  = 1.1f * 40.0f;
-        rim->intensity  = 1.2f * 40.0f;
-        fill->intensity = 0.9f * 40.0f;
-        key->color  = Vec3(1.0f, 1.0f, 0.65f);
-        rim->color  = Vec3(1.0f, 0.25f, 0.25f);
-        fill->color = Vec3(0.65f, 0.65f, 1.0f );
-        key->position_or_direction  = Vec3(10, 10, -5);
-        rim->position_or_direction  = Vec3(2, 5, 12);
-        fill->position_or_direction = Vec3(-10, 10, -5);
+    void OnMouseButtonDown(mouse::Button &mouse_button) override {
+        mouse::pos_raw_diff_x = mouse::pos_raw_diff_y = 0;
     }
-    { // Setup Materials:
-        scene->materials->roughness = 0.5f;
-        scene->materials->brdf = BRDF_CookTorrance;
+    void OnMouseButtonDoubleClicked(mouse::Button &mouse_button) override {
+        if (&mouse_button == &mouse::left_button) {
+            mouse::is_captured = !mouse::is_captured;
+            os::setCursorVisibility(!mouse::is_captured);
+            os::setWindowCapture(    mouse::is_captured);
+            OnMouseButtonDown(mouse_button);
+        }
     }
-    { // Setup Primitives:
-        Primitive *floor  = scene->primitives + PRIM_FLOOR;
-        Primitive *dog    = scene->primitives + PRIM_DOG;
-        Primitive *dragon = scene->primitives + PRIM_DRAGON;
-        Primitive *monkey = scene->primitives + PRIM_MONKEY;
-        floor->type  = PrimitiveType_Quad;
-        floor->scale = Vec3(40, 1, 40);
-        dog->type    = PrimitiveType_Mesh;
-        dragon->type = PrimitiveType_Mesh;
-        monkey->type = PrimitiveType_Mesh;
-        dog->id    = MESH_DOG;
-        dragon->id = MESH_DRAGON;
-        monkey->id = MESH_MONKEY;
-        dog->position    = Vec3( 4, 2, 8);
-        monkey->position = Vec3(-4, 1.2f, 8);
-        dragon->position = Vec3( 0, 2, -1);
-    }
-}
-void initApp(Defaults *defaults) {
-    static String mesh_files[MESH_COUNT];
-    static char string_buffers[MESH_COUNT][100];
-    char* this_file   = __FILE__;
-    char* dog_file    = "dog.mesh";
-    char* dragon_file = "dragon.mesh";
-    char* monkey_file = "monkey.mesh";
-    String *dog    = &mesh_files[MESH_DOG];
-    String *dragon = &mesh_files[MESH_DRAGON];
-    String *monkey = &mesh_files[MESH_MONKEY];
-    dog->char_ptr    = string_buffers[MESH_DOG];
-    dragon->char_ptr = string_buffers[MESH_DRAGON];
-    monkey->char_ptr = string_buffers[MESH_MONKEY];
-    u32 dir_len = getDirectoryLength(this_file);
-    mergeString(dog,    this_file, dog_file,    dir_len);
-    mergeString(dragon, this_file, dragon_file, dir_len);
-    mergeString(monkey, this_file, monkey_file, dir_len);
-    defaults->settings.scene.mesh_files = mesh_files;
-    defaults->settings.scene.meshes     = MESH_COUNT;
-    defaults->settings.scene.lights     = LIGHT_COUNT;
-    defaults->settings.scene.primitives = PRIM_COUNT;
-    defaults->settings.scene.materials  = 1;
-    app->on.sceneReady    = setupScene;
-    app->on.windowRedraw  = updateAndRender;
-    app->on.keyChanged               = onKeyChanged;
-    app->on.mouseButtonDown          = onMouseButtonDown;
-    app->on.mouseButtonDoubleClicked = onMouseDoubleClicked;
+};
+
+SlimApp* createApp() {
+    return (SlimApp*)new MeshesApp();
 }

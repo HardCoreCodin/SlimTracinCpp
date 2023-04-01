@@ -51,7 +51,7 @@ struct Scene {
     AABB *aabbs{nullptr};
     RectI *screen_bounds{nullptr};
 
-    void updateAABB(AABB &aabb, const Geometry &geo, u8 sphere_steps = 36) {
+    void updateAABB(AABB &aabb, const Geometry &geo, u8 sphere_steps = 255) {
         static QuadVertices quad_vertices;
         static TetVertices tet_vertices;
         static BoxVertices box_vertices;
@@ -69,24 +69,29 @@ struct Scene {
             case GeometryType_Quad  : vertex_count = QUAD__VERTEX_COUNT; vertices = quad_vertices.array; break;
             case GeometryType_Mesh  : vertex_count = BOX__VERTEX_COUNT;  vertices = mesh_vertices.array; mesh_vertices = BoxVertices{meshes[geo.id].aabb}; break;
             case GeometryType_Sphere: {
-                vec3 center_to_orbit{1.0f, 0.0f, 0.0f};
-                mat3 rotation{mat3::RotationAroundY(TAU / (f32)sphere_steps)};
+                if (geo.transform.scale.x == geo.transform.scale.y && geo.transform.scale.x == geo.transform.scale.z) {
+                    aabb.min = geo.transform.position - geo.transform.scale;
+                    aabb.max = geo.transform.position + geo.transform.scale;
+                } else {
+                    vec3 center_to_orbit{1.0f, 0.0f, 0.0f};
+                    mat3 rotation{mat3::RotationAroundY(TAU / (f32)sphere_steps)};
 
-                // Transform vertices positions from local-space to world-space:
-                for (u8 i = 0; i < sphere_steps; i++) {
-                    center_to_orbit = rotation * center_to_orbit;
+                    // Transform vertices positions from local-space to world-space:
+                    for (u8 i = 0; i < sphere_steps; i++) {
+                        center_to_orbit = rotation * center_to_orbit;
 
-                    pos = geo.transform.externPos(center_to_orbit);
-                    aabb.min = minimum(aabb.min, pos);
-                    aabb.max = maximum(aabb.max, pos);
+                        pos = geo.transform.externPos(center_to_orbit);
+                        aabb.min = minimum(aabb.min, pos);
+                        aabb.max = maximum(aabb.max, pos);
 
-                    pos = geo.transform.externPos({center_to_orbit.x, center_to_orbit.z, 0.0f});
-                    aabb.min = minimum(aabb.min, pos);
-                    aabb.max = maximum(aabb.max, pos);
+                        pos = geo.transform.externPos({center_to_orbit.x, center_to_orbit.z, 0.0f});
+                        aabb.min = minimum(aabb.min, pos);
+                        aabb.max = maximum(aabb.max, pos);
 
-                    pos = geo.transform.externPos({0.0f, center_to_orbit.x, center_to_orbit.z});
-                    aabb.min = minimum(aabb.min, pos);
-                    aabb.max = maximum(aabb.max, pos);
+                        pos = geo.transform.externPos({0.0f, center_to_orbit.x, center_to_orbit.z});
+                        aabb.min = minimum(aabb.min, pos);
+                        aabb.max = maximum(aabb.max, pos);
+                    }
                 }
             } break;
             default: return;
@@ -292,7 +297,7 @@ struct Scene {
                 f32 light_radius = light.intensity * (1.0f / (8.0f * 16.0f));
                 xform.position = light.position_or_direction;
                 xform.scale = light_radius;
-                xform.rotation = {};
+                xform.orientation.reset();
 
                 local_ray.localize(ray, xform);
                 if (local_ray.hitsDefaultSphere(local_hit)) {

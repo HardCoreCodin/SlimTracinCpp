@@ -3,74 +3,80 @@
 #include "../core/ray.h"
 #include "../core/texture.h"
 #include "../scene/material.h"
+#include "./tracers/scene.h"
 
-struct Sampler {
-    const RayHit &hit;
-    const Texture *textures = nullptr;
+
+INLINE_XPU Color sample(const Material &material, u8 slot, const Texture *textures, vec2 uv, f32 uv_coverage) {
+    return (textures && material.texture_count > slot) ? textures[material.texture_ids[slot]].sample(uv.u, uv.v, uv_coverage).color : Black;
+}
+
+INLINE_XPU Color sample(const Texture &texture, const RayHit &hit) {
+    return texture.sample(hit.uv.u, hit.uv.v, hit.uv_coverage).color;
+}
+
+INLINE_XPU Color sample(Material &material, const RayHit &hit, u8 texture_slot, const Texture *textures) {
+    return sample(material, texture_slot, textures, hit.uv, hit.uv_coverage);
+}
+
+INLINE_XPU Color sampleAlbedo(Material &material, const RayHit &hit, const Texture *textures) {
+    return sample(material, hit, 0, textures);
+}
+
+INLINE_XPU Color sampleNormal(Material &material, const RayHit &hit, const Texture *textures) {
+    return sample(material, hit, 1, textures);
+}
+
+INLINE_XPU vec3 sampleNormal(Material &material, const RayHit &hit, const Texture *textures, const vec3 &normal) {
+    return rotateNormal(normal, sampleNormal(material, hit, textures), material.normal_magnitude);
+}
+
+struct Surface {
+    RayHit hit;
+    Geometry *geometry = nullptr;
     Material *material = nullptr;
 
-    Sampler(const RayHit &hit, const Texture *textures, Material *material = nullptr) : hit{hit}, textures{textures}, material{material} {}
-
-    INLINE_XPU static Color sample(const Material &material, u8 slot, const Texture *textures, vec2 uv, f32 uv_coverage) {
-        return (textures && material.texture_count > slot) ? textures[material.texture_ids[slot]].sample(uv.u, uv.v, uv_coverage).color : Black;
-    }
-
-    INLINE_XPU Color sample(const Texture &texture) const { return texture.sample(hit.uv.u, hit.uv.v, hit.uv_coverage).color; }
-    INLINE_XPU Color sample(u8 texture_slot) const { return sample(*material, texture_slot, textures, hit.uv, hit.uv_coverage); }
-    INLINE_XPU Color sampleAlbedo() const { return sample(0); }
-    INLINE_XPU Color sampleNormal() const { return sample(1); }
-    INLINE_XPU vec3 sampleNormal(const vec3 &normal) const { return rotateNormal(normal, sampleNormal(), material->normal_magnitude); }
-};
-
-
-
-struct Shader {
-    Material *M;
     Color F, albedo_from_map;
-    vec3 N, V, L, R, RF, H;
-    f32 Ld, Ld2, NdotL, NdotV, NdotH, HdotL, RdotL, IOR;
+    vec3 P, N, V, L, R, RF, H, emissive_quad_vertices[4];
+    f32 Ld, Ld2, NdotL, NdotV, NdotH, HdotL, IOR;
+
     bool refracted = false;
 
-    INLINE_XPU void reset(Material &material, const vec3 &normal, const vec3 &direction, bool from_behind, const Color &sampled_albedo = White) {
-        M = &material;
-        V = -direction;
-        N = normal;
-        R = direction.reflectedAround(N);
-        NdotV = clampedValue(N.dot(V));
-        albedo_from_map = sampled_albedo;
+    INLINE_XPU void shadeFromLight(const Light &light, SceneTracer &tracer, Color &color) {
+        if (isFacingLight(light) &&
+            !tracer.inShadow(P, L, Ld))
+            // color += fr(p, L, V) * Li(p, L) * cos(w)
+            color = radianceFraction().mulAdd(light.color * (NdotL * light.intensity / Ld2), color);
+    }
 
-        refracted = material.isRefractive();
+    INLINE_XPU void prepareForShading(SceneTracer &tracer, Ray &ray) {
+        material = tracer.scene.materials + geometry->material_id;
+        if (material->hasNormalMap())
+            hit.normal = rotateNormal(
+                    hit.normal,
+                    sampleNormal(*material, hit, tracer.scene.textures),
+                    material->normal_magnitude
+        );
+
+        P = hit.position;
+        N = hit.normal;
+        R = ray.direction.reflectedAround(N);
+        V = -ray.direction;
+        NdotV = clampedValue(N.dot(V));
+        albedo_from_map = material->hasAlbedoMap() ? sampleAlbedo(*material, hit, tracer.scene.textures) : White;
+
+        refracted = material->isRefractive();
         if (refracted) {
-            IOR = from_behind ? (material.IOR / IOR_AIR) : (IOR_AIR / material.IOR);
+            IOR = hit.from_behind ? (material->IOR / IOR_AIR) : (IOR_AIR / material->IOR);
             f32 c = IOR*IOR * (1.0f - (NdotV * NdotV));
             refracted = c < 1.0f;
-            RF = refracted ? normal.scaleAdd(IOR * NdotV - sqrtf(1 - c), direction * IOR).normalized() : R;
-        }
-
-        if (M->brdf == BRDF_CookTorrance) {
-            // Metals have no albedo color, and so typically in PBR the albedo component is re-purposed to be used for
-            // the specular color of the reflective metal, represents the reflected color at a zero angle (F0).
-            // So if a metalic material is textured, it can encode F0 values per-texel in the albedo map, to be used
-            // instead of the constant material parameter, and so based on metalness the kd (albedo sample) is take.
-            // Similarly, Kd is lerped towards black by metalness, to nullify the diffuse contributions (for metals).
-//            F0 = material.F0.lerpTo(Kd, material.metalness);
-//            Kd = Kd.lerpTo(Black, material.metalness);
-            // This allows for layered material containing both metalic and dialectric surfaces using a single texture.
-            // When 'shadeFromLight()' below is invoked for a material with the Cook Torrance BRDF, it assumes that for
-            // metalic materials the F0 will contain the specular color, and so stored the result in Ks.
-        } else {
-            // When not using the Cook-Torrance BRDF, F0 is computed from the index of refraction.
-//            IOR2 = 1.0f / IOR;
-//            R0 = IOR - IOR2;
-//            R0 /= IOR + IOR2;
-//            R0 *= R0;
+            RF = refracted ? N.scaleAdd(IOR * NdotV - sqrtf(1 - c), ray.direction * IOR).normalized() : R;
         }
     }
 
-    INLINE_XPU void shadeFromLight(const Light &light, Color &color) {
-        Color radiance_fraction{M->albedo * albedo_from_map};
-        if (M->brdf == BRDF_CookTorrance) {
-            radiance_fraction *= (1.0f - M->metalness) * ONE_OVER_PI;
+    INLINE_XPU Color radianceFraction() {
+        Color radiance_fraction{material->albedo * albedo_from_map};
+        if (material->brdf == BRDF_CookTorrance) {
+            radiance_fraction *= (1.0f - material->metalness) * ONE_OVER_PI;
 
             if (NdotV > 0.0f) { // TODO: This should not be necessary to check for, because rays would miss in that scenario so the code should never even get to this point - and yet it seems like it does.
                 // If the viewing direction is perpendicular to the normal, no light can reflect
@@ -78,20 +84,20 @@ struct Shader {
 
                 // If roughness is 0 then the NDF (and hence the entire brdf) evaluates to 0
                 // Otherwise, a negative roughness makes no sense logically and would be a user-error
-                if (M->roughness > 0.0f) {
+                if (material->roughness > 0.0f) {
                     H = (L + V).normalized();
                     NdotH = clampedValue(N.dot(H));
                     HdotL = clampedValue(H.dot(L));
-                    Color Fs = cookTorrance(M->roughness, NdotL, NdotV, HdotL, NdotH, M->reflectivity, F);
+                    Color Fs = cookTorrance(material->roughness, NdotL, NdotV, HdotL, NdotH, material->reflectivity, F);
                     radiance_fraction = radiance_fraction.mulAdd(1.0f - F, Fs);
                 }
             }
         } else {
-            radiance_fraction *= M->roughness * ONE_OVER_PI;
+            radiance_fraction *= material->roughness * ONE_OVER_PI;
 
-            if (M->brdf != BRDF_Lambert) {
+            if (material->brdf != BRDF_Lambert) {
                 f32 specular_factor, exponent;
-                if (M->brdf == BRDF_Phong) {
+                if (material->brdf == BRDF_Phong) {
                     exponent = 4.0f;
                     specular_factor = clampedValue(R.dot(L));
                 } else {
@@ -99,17 +105,16 @@ struct Shader {
                     specular_factor = clampedValue(N.dot((L + V).normalized()));;
                 }
                 if (specular_factor > 0.0f)
-                    radiance_fraction = M->reflectivity.scaleAdd(
-                            powf(specular_factor, exponent) * (1.0f - M->roughness),
+                    radiance_fraction = material->reflectivity.scaleAdd(
+                            powf(specular_factor, exponent) * (1.0f - material->roughness),
                             radiance_fraction);
             }
         }
 
-        // color += fr(p, L, V) * Li(p, L) * cos(w)
-        color = radiance_fraction.mulAdd(light.color * (NdotL * light.intensity / Ld2), color);
+        return radiance_fraction;
     }
 
-    INLINE_XPU bool isFacingLight(const Light &light, const vec3 &P) {
+    INLINE_XPU bool isFacingLight(const Light &light) {
         if (light.is_directional) {
             Ld = Ld2 = INFINITY;
             L = -light.position_or_direction;
@@ -122,124 +127,85 @@ struct Shader {
         NdotL = clampedValue(L.dot(N));
         return NdotL > 0.0f;
     }
-/*
-    INLINE_XPU Color fr(const Color& Kd, f32 Fd, const Color &Ks, f32 Fs) {
-        // The reflectance portion of the reflectance equation with Cook Torrance:
-        // Kd*Fd + Ks*Fs (FMA used here for performance)
-        return Kd.scaleAdd(Fd, Ks * Fs);
-    }
 
-    INLINE_XPU Color Li(const Light &light, f32 NdotL) {
-        return light.color * (NdotL * light.intensity / Ld2);
-    }
+    INLINE_XPU bool shadeFromEmissiveQuads(SceneTracer &tracer, Color &color) {
+        bool found = false;
 
-    INLINE_XPU Color shadeClassic(f32 specular_factor, f32 exponent) {
-        Color radiance_fraction{ M->albedo * albedo_from_map * (M->roughness * ONE_OVER_PI) };
+        Ray &ray{tracer.shadow_ray};
+        vec3 &p{tracer.shadow_hit.position};
+        vec3 *v = emissive_quad_vertices;
+        vec3 Ro;
 
-        // If the light is perpendicular-to/has-obtuse-angle-towards the reflected direction, the light is hitting
-        // the surface from behind the viewing direction, so no specular contribution should be accounted for.
-        return specular_factor ?
-               M->reflectivity.scaleAdd(powf(specular_factor, exponent) * (1.0f - M->roughness),
-                                        radiance_fraction
-               ) : radiance_fraction;
-    }
+        for (u32 i = 0; i < tracer.scene.counts.geometries; i++) {
+            Geometry &quad{tracer.scene.geometries[i]};
+            Transform &area_light{quad.transform};
+            Material &emissive_material = tracer.scene.materials[quad.material_id];
+            if (quad.type != GeometryType_Quad || !(emissive_material.isEmissive()))
+                continue;
 
-    INLINE_XPU void shadeFromLight3(const Light &light, Color &color) {
-        if (M->brdf == BRDF_Phong)
-            RdotL = clampedValue(R.dot(L));
-        else if (M->brdf != BRDF_Lambert) {
-            H = (L + V).normalized();
-            NdotH = clampedValue(N.dot(H));
-        }
+            L = area_light.position - P;
+            NdotL = N.dot(L);
+            if (NdotL <= 0.0f || L.dot(area_light.orientation * vec3{0.0f, -1.0f, 1.0f}) <= 0.0f)
+                continue;
 
-        Color radiance_fraction;
+            L = L.normalized();
+            Ro = L.scaleAdd(TRACE_OFFSET, P);
+            ray.localize(Ro, L, area_light);
+            if (ray.hitsDefaultQuad(tracer.shadow_hit, quad.flags & GEOMETRY_IS_TRANSPARENT) &&
+                tracer.shadow_hit.distance < hit.distance) {
+                found = true;
+            }
 
-        switch (M->brdf) {
-            case BRDF_Lambert: radiance_fraction = shadeClassic(0.0f, 0.0f); break;
-            case BRDF_Phong: radiance_fraction = shadeClassic(RdotL, 4.0f); break;
-            case BRDF_Blinn: radiance_fraction = shadeClassic(NdotH, 16.0f); break;
-            default:
-                f32 Kd = ONE_OVER_PI * (1.0f - M->metalness);
-                radiance_fraction = M->albedo * albedo_from_map;
-                if (NdotV) { // TODO: This should not be necessary to check for, because rays would miss in that scenario so the code should never even get to this point - and yet it seems like it does.
-                    // If the viewing direction is perpendicular to the normal, no light can reflect
-                    // Both the numerator and denominator would evaluate to 0 in this case, resulting in NaN
-
-                    // If roughness is 0 then the NDF (and hence the entire brdf) evaluates to 0
-                    // Otherwise, a negative roughness makes no sense logically and would be a user-error
-                    if (M->roughness > 0.0f) {
-                        HdotL = clampedValue(H.dot(L));
-                        Color Fs = cookTorrance(M->roughness, NdotL, NdotV, HdotL, NdotH, M->reflectivity, F);
-                        radiance_fraction = radiance_fraction.mulAdd(Kd * (1.0f - F), Fs);
-                    } else radiance_fraction *= Kd;
-                } else radiance_fraction *= Kd;
-        }
-
-        // The reflectance equation (FMA used here for performance):
-        // color += fr(p, L, V) * Li(p, L) * cos(w)
-        color = radiance_fraction.mulAdd(Li(light, NdotL), color);
-    }
-
-    INLINE_XPU void shadeFromLight2(const Light &light, Color &color) {
-        Color Kd = M->albedo * albedo_from_map * M->roughness;
-        Color Ks = M->reflectivity;
-        f32 Fd = ONE_OVER_PI;
-        f32 Fs = 1.0f;
-
-        // Compute specular component coefficient:
-        if (M->brdf == BRDF_Phong) {
-            RdotL = clampedValue(R.dot(L));
-            // If the light is perpendicular-to/has-obtuse-angle-towards the reflected direction, the light is hitting
-            // the surface from behind the viewing direction, so no specular contribution should be accounted for.
-            if (RdotL > 0.0f)
-                Fs = classicSpecularFactor(1.0f - M->roughness, RdotL, 4.0f);
-            else
-                Ks = 0.0f;
-        } else {
-            // Both Blinn and Cook-Torrance require the half vector and the cosine of its angle to the normal direction:
-            H = (L + V).normalized();
-            NdotH = N.dot(H);
-            // Note: If the half vector is perpendicular to the normal, the light aims directly opposite to the normal.
-            // If the half vector has obtuse angle to the normal, the light aims away from the normal.
-            // In either cases, the cosine of the normal and the light would also been zero/negative.
-            // That means the code would never even get here, because this is checked for before.
-            // Because of that, there is no need for a check the angle between the normal and the half vector
-            // There is also no need to clamp the cosine, for the same reason.
-
-//            NdotH = clampedValue(N.dot(H);
-//            if (NdotH > 0.0f) {
-            if (M->brdf == BRDF_CookTorrance) {
-                // if (NdotV != 0.0f) {
-                // If the viewing direction is perpendicular to the normal, no light can reflect
-                // Both the numerator and denominator would evaluate to 0 in this case, resulting in NaN
-                // Note: This should not be necessary to check for, because rays would miss in that scenario,
-                // so the code should never even get to this point.
-
-                // If roughness is 0 then the NDF (and hence the entire brdf) evaluates to 0
-                // Otherwise, a negative roughness makes no sense logically and would be a user-error
-                if (M->roughness > 0.0f) {
-                    HdotL = clampedValue(H.dot(L));
-                    Ks = cookTorrance(M->roughness, NdotL, NdotV, HdotL, NdotH, M->reflectivity, F);
-                    if (Ks.r >= 1.0f || Ks.g >= 1.0f || Ks.b >= 1.0f || Ks.r < 0.0f || Ks.g < 0.0f || Ks.b < 0.0f) {
-                        Ks = cookTorrance(M->roughness, NdotL, NdotV, HdotL, NdotH, M->reflectivity, F);
-//                        Ks = Color{clampedValue(Ks.r), clampedValue(Ks.g), clampedValue(Ks.b)}
+            f32 emission_intensity = N.dot(getAreaLightVector(area_light, P, v));
+            if (emission_intensity > 0) {
+                bool skip = true;
+                for (u8 j = 0; j < 4; j++) {
+                    if (N.dot(v[j] - P) >= 0) {
+                        skip = false;
+                        break;
                     }
-                } else
-                    Ks = 0.0f;
+                }
+                if (skip)
+                    continue;
 
-                Kd = M->albedo * albedo_from_map * (1.0f - F) * (1.0f - M->metalness);
-            } else // brdf == BRDF_Blinn
-                Fs = classicSpecularFactor(1.0f - M->roughness, NdotH, 16.0f);
+                f32 shaded_light = 1;
+                for (u32 s = 0; s < tracer.scene.counts.geometries; s++) {
+                    if (s == i)
+                        continue;
+
+                    Geometry &shadowing_primitive = tracer.scene.geometries[s];
+//                    if (N.dot(shadowing_primitive.transform.position - quad.transform.position) >= 0.0f)
+//                        continue;
+
+                    ray.localize(Ro, L, shadowing_primitive.transform);
+                    tracer.shadow_hit.distance = hit.distance;
+                    f32 d = 1;
+                    if (shadowing_primitive.type == GeometryType_Sphere) {
+                        if (ray.hitsDefaultSphere(tracer.shadow_hit, shadowing_primitive.flags & GEOMETRY_IS_TRANSPARENT))
+                            d -= (1.0f - tracer.shadow_hit.distance) / (tracer.shadow_hit.distance * emission_intensity * 3);
+                    } else if (shadowing_primitive.type == GeometryType_Quad) {
+                        if (ray.hitsDefaultQuad(tracer.shadow_hit, shadowing_primitive.flags & GEOMETRY_IS_TRANSPARENT)) {
+                            p.y = 0;
+                            p.x = p.x < 0 ? -p.x : p.x;
+                            p.z = p.z < 0 ? -p.z : p.z;
+                            if (p.x > p.z) {
+                                p.y = p.z;
+                                p.z = p.x;
+                                p.x = p.y;
+                                p.y = 0;
+                            }
+                            d -= (1.0f - p.z) / (tracer.shadow_hit.distance * emission_intensity);
+                        }
+                    }
+                    if (d < shaded_light)
+                        shaded_light = d;
+                }
+
+                if (shaded_light > 0.0f)
+                    color = radianceFraction().mulAdd(emissive_material.emission * (emission_intensity * shaded_light), color);
+            }
         }
 
-        // The reflectance equation (FMA used here for performance):
-        // color += fr(p, L, V) * Li(p, L) * cos(w)
-        Color result = fr(Kd, Fd, Ks, Fs);
-        Color lighting = Li(light, NdotL);
-        color = (
-                result.mulAdd(lighting,
-                            color)
-        );
+        return found;
     }
-*/
 };

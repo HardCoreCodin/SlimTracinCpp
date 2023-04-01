@@ -51,39 +51,39 @@ INLINE_XPU quat Quat(const mat3 &m) {
     switch(biggestIndex) {
         case 0:
             return {
-                    {
-                            (m.Y.z - m.Z.y) * mult,
-                            (m.Z.x - m.X.z) * mult,
-                            (m.X.y - m.Y.x) * mult
-                    },
-                    biggestVal
+                {
+                    (m.Y.z - m.Z.y) * mult,
+                    (m.Z.x - m.X.z) * mult,
+                    (m.X.y - m.Y.x) * mult
+                },
+                biggestVal
             };
         case 1:
             return {
-                    {
-                            biggestVal,
-                            (m.X.y + m.Y.x) * mult,
-                            (m.Z.x + m.X.z) * mult
-                    },
-                    (m.Y.z - m.Z.y) * mult
+                {
+                    biggestVal,
+                    (m.X.y + m.Y.x) * mult,
+                    (m.Z.x + m.X.z) * mult
+                },
+                (m.Y.z - m.Z.y) * mult
             };
         case 2:
             return {
-                    {
-                            (m.X.y + m.Y.x) * mult,
-                            biggestVal,
-                            (m.Y.z + m.Z.y) * mult
-                    },
-                    (m.Z.x - m.X.z) * mult
+                {
+                    (m.X.y + m.Y.x) * mult,
+                    biggestVal,
+                    (m.Y.z + m.Z.y) * mult
+                },
+                (m.Z.x - m.X.z) * mult
             };
         case 3:
             return {
-                    {
-                            (m.Z.x + m.X.z) * mult,
-                            (m.Y.z + m.Z.y) * mult,
-                            biggestVal
-                    },
-                    (m.X.y - m.Y.x) * mult
+                {
+                    (m.Z.x + m.X.z) * mult,
+                    (m.Y.z + m.Z.y) * mult,
+                    biggestVal
+                },
+                (m.X.y - m.Y.x) * mult
             };
     }
 
@@ -97,27 +97,27 @@ INLINE_XPU mat3 Mat3I(const quat &rotation)  {
 INLINE_XPU mat4 Mat4(const quat &rotation, const vec3 &scale, const vec3 &position) {
     mat3 rotation_matrix{Mat3(rotation)};
     return {
-            Vec4(rotation_matrix.X * scale.x),
-            Vec4(rotation_matrix.Y * scale.y),
-            Vec4(rotation_matrix.Z * scale.z),
-            Vec4(position, 1)
+        Vec4(rotation_matrix.X * scale.x),
+        Vec4(rotation_matrix.Y * scale.y),
+        Vec4(rotation_matrix.Z * scale.z),
+        Vec4(position, 1)
     };
 }
 
 INLINE_XPU mat4 Mat4(const mat3 &m3, const vec4 &W = {0, 0, 0, 1}) {
     return {
-            Vec4(m3.X),
-            Vec4(m3.Y),
-            Vec4(m3.Z),
-            W
+        Vec4(m3.X),
+        Vec4(m3.Y),
+        Vec4(m3.Z),
+        W
     };
 }
 
 INLINE_XPU mat4 Mat4(const mat3 &rotation, const vec3 &position) {
     return {
-            Vec4(rotation.X),
-            Vec4(rotation.Y),
-            Vec4(rotation.Z),
-            Vec4(position, 1.0f)
+        Vec4(rotation.X),
+        Vec4(rotation.Y),
+        Vec4(rotation.Z),
+        Vec4(position, 1.0f)
     };
 }

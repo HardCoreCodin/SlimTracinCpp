@@ -10,17 +10,17 @@ struct AmbientLight{
 };
 
 struct Light {
-    Color color;
-    vec3 position_or_direction;
+    Color color{White};
+    vec3 position_or_direction{};
     f32 intensity = 1.0f;
     bool is_directional = false;
 
-    Light(vec3 position_or_direction = 0.0f, Color color = White, f32 intensity = 1.0f, bool is_directional = false) :
-            position_or_direction{position_or_direction},
-            color{color},
-            intensity{intensity},
-            is_directional{is_directional}
-    {}
+//    Light(vec3 position_or_direction = 0.0f, Color color = White, f32 intensity = 1.0f, bool is_directional = false) :
+//            position_or_direction{position_or_direction},
+//            color{color},
+//            intensity{intensity},
+//            is_directional{is_directional}
+//    {}
 };
 
 INLINE_XPU f32 ggxTrowbridgeReitz_D(f32 roughness, f32 NdotH) { // NDF
@@ -98,35 +98,10 @@ struct Material {
     f32 metalness = 0.0f;
     f32 normal_magnitude = 1.0f;
     f32 IOR = 1.0f;
-    BRDFType brdf{BRDF_Phong};
-    u8 texture_count = 0;
+    BRDFType brdf{BRDF_CookTorrance};
     u8 flags = 0;
+    u8 texture_count = 0;
     u8 texture_ids[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-
-    Material(BRDFType brdf = BRDF_Phong,
-             f32 roughness = 1.0f,
-             f32 metalness = 0.0f,
-             u8 flags = 0,
-             u8 texture_count = 0,
-             const Color &albedo = 1.0f,
-             const Color &reflectivity = F0_Default,
-             const Color &emission = 0.0f,
-             UV uv_repeat = 1.0f,
-             f32 normal_magnitude = 1.0f,
-             f32 IOR = 1.0f,
-             const Color &F0 = F0_Default) :
-            albedo{albedo},
-            reflectivity{reflectivity},
-            emission{emission},
-            uv_repeat{uv_repeat},
-            roughness{roughness},
-            metalness{metalness},
-            normal_magnitude{normal_magnitude},
-            IOR{IOR},
-            brdf{brdf},
-            texture_count{texture_count},
-            flags{flags}
-            {}
 
     INLINE_XPU bool isEmissive() const { return flags & MATERIAL_IS_EMISSIVE; }
     INLINE_XPU bool isReflective() const { return flags & MATERIAL_IS_REFLECTIVE; }

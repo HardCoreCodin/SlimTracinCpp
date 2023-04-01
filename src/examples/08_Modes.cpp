@@ -13,37 +13,48 @@
 struct ModesApp : SlimApp {
     // Viewport:
     Camera camera{
-            {-4, 15, -17},
-            {-25 * DEG_TO_RAD, 0, 0}
+        .orientation = {-25 * DEG_TO_RAD, 0, 0},
+        .position = {-4, 15, -17}
     }, *cameras{&camera};
     Canvas canvas;
     Viewport viewport{canvas,&camera};
 
     // Scene:
     Light key_light{
-            {20, 20, -5},
-            {1.0f, 1.0f, 0.65f},
-            1.1f * 150.0f};
+        .color = {1.0f, 1.0f, 0.65f},
+        .position_or_direction = {20, 20, -5},
+        .intensity = 1.1f * 150.0f
+    };
     Light fill_light{
-            {-20, 20, -5},
-            {0.65f, 0.65f, 1.0f},
-            1.2f * 150.0f
+        .color = {0.65f, 0.65f, 1.0f},
+        .position_or_direction = {-20, 20, -5},
+        .intensity = 1.2f * 150.0f
     };
     Light rim_light{
-            {5, 5, 20},
-            {1.0f, 0.25f, 0.25f},
-            0.9f * 150.0f
+        .color = {1.0f, 0.25f, 0.25f},
+        .position_or_direction = {5, 5, 20},
+        .intensity = 0.9f * 150.0f
     };
     Light *lights{&key_light};
 
-    Material shapes_material{BRDF_Lambert, 1.0f, 0.0f, 0, 0, {0.8f, 1.0f, 0.8f}};
-    Material floor_material{BRDF_CookTorrance, 0.2f, 0.0f, MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
+    Material shapes_material{
+        .albedo = {0.8f, 1.0f, 0.8f},
+        .brdf = BRDF_Lambert
+    };
+    Material floor_material{
+        .roughness = 0.2f,
+        .brdf = BRDF_CookTorrance,
+        .flags = MATERIAL_HAS_NORMAL_MAP |
+                 MATERIAL_HAS_ALBEDO_MAP,
+        .texture_count = 2,
+        .texture_ids = {0, 1}
+    };
     Material *materials{&shapes_material};
 
     char string_buffers[2][200];
     String texture_files[2]{
-            String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
-            String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
+        String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
+        String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
     };
 
     Texture floor_albedo_map;
@@ -51,38 +62,45 @@ struct ModesApp : SlimApp {
     Texture *textures = &floor_albedo_map;
 
     Geometry box{
-            {
-                    {-11, 8, 5},
-                    {0.02f, 0.04f, 0.0f},
-                    {3,4,5}
-            },
-            GeometryType_Box
+        .transform = {
+            .orientation = {0.02f, 0.04f, 0.0f},
+            .position = {-11, 8, 5},
+            .scale = {3, 4, 5}
+        },
+        .type = GeometryType_Box
     };
     Geometry tet{
-            {
-                    {-3, 6, 14},
-                    {0.02f, 0.04f, 0.06f},
-                    {4,3, 5}
-            },
-            GeometryType_Tet
+        .transform = {
+            .orientation = {0.02f, 0.04f, 0.06f},
+            .position = {-3, 6, 14},
+            .scale = {4, 3, 5}
+        },
+        .type = GeometryType_Tet
     };
     Geometry sphere{
-            {
-                    {3, 6, 2}, {},
-                    {5,4,3}
-            },
-            GeometryType_Sphere
+        .transform = {
+            .position = {3, 6, 2},
+            .scale = {5, 4, 3}
+        },
+        .type = GeometryType_Sphere
     };
     Geometry floor{
-            {{}, {},
-             {40, 1, 40}
-            },
-            GeometryType_Quad
+        .transform = {
+            .scale = {40, 1, 40}
+        },
+        .type = GeometryType_Quad,
+        .material_id = 1
     };
 
     Geometry *geometries{&box};
 
-    SceneCounts counts{4, 1, 3, 2, 2};
+    SceneCounts counts{
+        .geometries = 4,
+        .cameras = 1,
+        .lights = 3,
+        .materials = 2,
+        .textures = 2
+    };
     Scene scene{counts, nullptr, geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 
@@ -90,7 +108,7 @@ struct ModesApp : SlimApp {
 
     // Drawing:
     f32 opacity = 0.2f;
-    quat rotation{tet.transform.rotation};
+    quat rotation{tet.transform.orientation};
 
     bool draw_TLAS = false;
     bool antialias = false;
@@ -98,37 +116,21 @@ struct ModesApp : SlimApp {
 
     // HUD:
     HUDLine FPS_hud_line{(char*)"FPS : "};
-    HUDLine GPU_hud_line{(char*)"GPU : ",
-                         (char*)"On",
-                         (char*)"Off",
-                         &ray_tracer.use_gpu,
-                         true};
     HUDLine AA_hud_line{(char*)"SSAA: ",
                         (char*)"On",
                         (char*)"Off",
                         &antialias,
                         true};
-    HUDLine Mode_hud_line{(char*)"Mode : ", (char*)"Beauty"};
-    HUDLine TLAS_hud_line{(char*)"TLAS : ", (char*)"BVH"};
+    HUDLine Mode_hud_line{(char*)"Mode : ",
+                          (char*)"Beauty"};
+    HUDLine TLAS_hud_line{(char*)"TLAS : ",
+                          (char*)"BVH"};
     HUDLine Draw_TLAS_hud_line{(char*)"Draw TLAS : ",
                                (char*)"On",
                                (char*)"Off",
                                &draw_TLAS,
                                true};
-    HUDLine Transparent_hud_line{(char*)"Transparent : ",
-                                 (char*)"On",
-                                 (char*)"Off",
-                                 &transparent,
-                                 true};
-    HUDSettings hud_settings{7};
-    HUD hud{hud_settings, &FPS_hud_line};
-
-    ModesApp() {
-        floor.material_id = 1;
-        floor_material.texture_count = 2;
-        floor_material.texture_ids[0] = 0;
-        floor_material.texture_ids[1] = 1;
-    }
+    HUD hud{{ 6 }, &FPS_hud_line};
 
     void OnRender() override {
         static Transform transform;
@@ -163,33 +165,39 @@ struct ModesApp : SlimApp {
             Geometry &geo = geometries[i];
 
             if (geo.type != GeometryType_Quad && !(controls::is_pressed::alt && &geo == selection.geometry))
-                geo.transform.rotation = (geo.transform.rotation * rot).normalized();
+                geo.transform.orientation = (geo.transform.orientation * rot).normalized();
         }
     }
 
     void OnKeyChanged(u8 key, bool is_pressed) override {
-        Move &move = viewport.navigation.move;
-        Turn &turn = viewport.navigation.turn;
-        if (key == 'Q') turn.left     = is_pressed;
-        if (key == 'E') turn.right    = is_pressed;
-        if (key == 'R') move.up       = is_pressed;
-        if (key == 'F') move.down     = is_pressed;
-        if (key == 'W') move.forward  = is_pressed;
-        if (key == 'S') move.backward = is_pressed;
-        if (key == 'A') move.left     = is_pressed;
-        if (key == 'D') move.right    = is_pressed;
         if (!is_pressed) {
-            if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
             if (key == 'B') draw_TLAS = !draw_TLAS;
-            if (key == 'G') ray_tracer.use_gpu = !ray_tracer.use_gpu;
-            if (key == 'X') { ray_tracer.use_ssb = !ray_tracer.use_ssb; TLAS_hud_line.value.string = ray_tracer.use_ssb ? (char*)"SSB" : (char*)"BVH";}
-            if (key == 'Z') { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
-            if (key == '1') { ray_tracer.render_mode = RenderMode_Beauty; Mode_hud_line.value.string = (char*)"Beauty"; }
-            if (key == '2') { ray_tracer.render_mode = RenderMode_Depth; Mode_hud_line.value.string = (char*)"Depth"; }
-            if (key == '3') { ray_tracer.render_mode = RenderMode_Normals; Mode_hud_line.value.string = (char*)"Normals"; }
-            if (key == '4') { ray_tracer.render_mode = RenderMode_NormalMap; Mode_hud_line.value.string = (char*)"Normal Maps"; }
-            if (key == '5') { ray_tracer.render_mode = RenderMode_MipLevel; Mode_hud_line.value.string = (char*)"Mip Level"; }
-            if (key == '6') { ray_tracer.render_mode = RenderMode_UVs; Mode_hud_line.value.string = (char*)"UVs"; }
+            if (key == 'X') {
+                ray_tracer.use_ssb = !ray_tracer.use_ssb;
+                TLAS_hud_line.value.string = ray_tracer.use_ssb ?
+                    (char*)"SSB" :
+                    (char*)"BVH";
+            }
+            if (key == 'Z') {
+                antialias = !antialias;
+                canvas.antialias = antialias ? SSAA : NoAA;
+            }
+            if (key == '1') ray_tracer.render_mode = RenderMode_Beauty;
+            if (key == '2') ray_tracer.render_mode = RenderMode_Depth;
+            if (key == '3') ray_tracer.render_mode = RenderMode_Normals;
+            if (key == '4') ray_tracer.render_mode = RenderMode_NormalMap;
+            if (key == '5') ray_tracer.render_mode = RenderMode_MipLevel;
+            if (key == '6') ray_tracer.render_mode = RenderMode_UVs;
+            char* mode;
+            switch (ray_tracer.render_mode) {
+                case RenderMode_Beauty:    mode = (char*)"Beauty"; break;
+                case RenderMode_Depth:     mode = (char*)"Depth"; break;
+                case RenderMode_Normals:   mode = (char*)"Normals"; break;
+                case RenderMode_NormalMap: mode = (char*)"Normal Maps"; break;
+                case RenderMode_MipLevel:  mode = (char*)"Mip Level"; break;
+                case RenderMode_UVs:       mode = (char*)"UVs"; break;
+            }
+            Mode_hud_line.value.string = mode;
             if (key == 'T' && selection.geometry) {
                 u8 &flags = selection.geometry->flags;
                 if (flags & GEOMETRY_IS_TRANSPARENT)
@@ -200,7 +208,19 @@ struct ModesApp : SlimApp {
                 transparent = flags & GEOMETRY_IS_TRANSPARENT;
 //                uploadMaterials(scene);
             }
+            if (key == 'G') ray_tracer.use_gpu = !ray_tracer.use_gpu;
+            if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
         }
+        Move &move = viewport.navigation.move;
+        Turn &turn = viewport.navigation.turn;
+        if (key == 'Q') turn.left     = is_pressed;
+        if (key == 'E') turn.right    = is_pressed;
+        if (key == 'R') move.up       = is_pressed;
+        if (key == 'F') move.down     = is_pressed;
+        if (key == 'W') move.forward  = is_pressed;
+        if (key == 'S') move.backward = is_pressed;
+        if (key == 'A') move.left     = is_pressed;
+        if (key == 'D') move.right    = is_pressed;
     }
     void OnWindowResize(u16 width, u16 height) override {
         viewport.updateDimensions(width, height);

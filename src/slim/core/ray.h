@@ -25,11 +25,15 @@ struct Ray {
     INLINE_XPU vec3 at(f32 t) const { return direction.scaleAdd(t, origin); }
     INLINE_XPU vec3 operator [](f32 t) const { return at(t); }
 
-    INLINE_XPU void localize(const Ray &ray, const Transform &transform) {
+    INLINE_XPU void localize(const vec3 &ray_origin, const vec3 &ray_direction, const Transform &transform) {
         vec3 inv_scale = 1.0f / transform.scale;
-        quat inv_rotation = transform.rotation.conjugate();
-        reset(inv_scale * (inv_rotation * (ray.origin - transform.position)),
-              inv_scale * (inv_rotation * ray.direction));
+        quat inv_rotation = transform.orientation.conjugate();
+        reset(inv_scale * (inv_rotation * (ray_origin - transform.position)),
+              inv_scale * (inv_rotation * ray_direction));
+    }
+
+    INLINE_XPU void localize(const Ray &ray, const Transform &transform) {
+        localize(ray.origin, ray.direction, transform);
     }
 
     INLINE_XPU void reset(const vec3 &new_origin, const vec3 &new_direction) {

@@ -1,4 +1,10 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.12)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS Off)
+
+set_property(GLOBAL PROPERTY CXX_STANDARD 20)
 
 project(01_Lights)
 add_executable(01_Lights WIN32 src/examples/01_Lights.cpp)
@@ -23,9 +29,6 @@ add_executable(07_Meshes WIN32 src/examples/07_Meshes.cpp)
 
 project(08_Modes)
 add_executable(08_Modes WIN32 src/examples/08_Modes.cpp)
-
-project(09_Textures)
-add_executable(09_Textures WIN32 src/examples/09_Textures.cpp)
 
 project(obj2mesh)
 add_executable(obj2mesh src/obj2mesh.cpp)

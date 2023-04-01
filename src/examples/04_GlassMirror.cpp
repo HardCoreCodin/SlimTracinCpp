@@ -9,26 +9,27 @@
 struct ClassicShadersApp : SlimApp {
     // Viewport:
     Camera camera{
-            {-4, 15, -17},
-            {-25 * DEG_TO_RAD, 0, 0}
+        .orientation = {-25 * DEG_TO_RAD, 0, 0},
+        .position = {-4, 15, -17}
     }, *cameras{&camera};
     Canvas canvas;
     Viewport viewport{canvas,&camera};
 
     // Scene:
     Light key_light{
-            {20, 20, -5},
-            {1.0f, 1.0f, 0.65f},
-            1.1f * 150.0f};
+        .color = {1.0f, 1.0f, 0.65f},
+        .position_or_direction = {20, 20, -5},
+        .intensity = 1.1f * 150.0f
+    };
     Light fill_light{
-            {-20, 20, -5},
-            {0.65f, 0.65f, 1.0f},
-            1.2f * 150.0f
+        .color = {0.65f, 0.65f, 1.0f},
+        .position_or_direction = {-20, 20, -5},
+        .intensity = 1.2f * 150.0f
     };
     Light rim_light{
-            {5, 5, 20},
-            {1.0f, 0.25f, 0.25f},
-            0.9f * 150.0f
+        .color = {1.0f, 0.25f, 0.25f},
+        .position_or_direction = {5, 5, 20},
+        .intensity = 0.9f * 150.0f
     };
     Light *lights{&key_light};
 
@@ -40,53 +41,103 @@ struct ClassicShadersApp : SlimApp {
     };
 
     Material rough_material{
-        BRDF_CookTorrance,
-        0.2f, 0.0f,
-        MATERIAL_HAS_ALBEDO_MAP | MATERIAL_HAS_NORMAL_MAP,
-        0,
-        {0.8f, 1.0f, 0.8f}
+        .albedo = {0.8f, 1.0f, 0.8f},
+        .roughness = 0.2f,
+        .flags = MATERIAL_HAS_ALBEDO_MAP |
+                 MATERIAL_HAS_NORMAL_MAP,
+        .texture_count = 2,
+        .texture_ids = {0, 1}
     };
     Material mirror_material{
-        BRDF_CookTorrance, 0.0f, 1.0f,
-        MATERIAL_IS_REFLECTIVE | MATERIAL_HAS_NORMAL_MAP,
-        0,
-        0.1f, 0.9f
+        .albedo = 0.1f,
+        .reflectivity = 0.9f,
+        .uv_repeat = 0.25f,
+        .roughness = 0.0f,
+        .metalness = 1.0f,
+        .normal_magnitude = 0.1f,
+        .flags = MATERIAL_IS_REFLECTIVE |
+                 MATERIAL_HAS_NORMAL_MAP,
+        .texture_count = 2,
+        .texture_ids = {0, 1}
     };
     Material glass_material{
-        BRDF_CookTorrance,
-        0.1f, 0.0f,
-        MATERIAL_IS_REFRACTIVE | MATERIAL_HAS_NORMAL_MAP,
-        0,
-        0.1f,
-        F0_Glass_Low,
-        0.0f,
-        1.0f,
-        0.1f,
-        IOR_GLASS
+        .albedo = 0.1f,
+        .reflectivity = F0_Glass_Low,
+        .uv_repeat = 0.125f,
+        .roughness = 0.1f,
+        .normal_magnitude = 0.1f,
+        .IOR = IOR_GLASS,
+        .flags = MATERIAL_IS_REFRACTIVE |
+                 MATERIAL_HAS_NORMAL_MAP,
+        .texture_count = 2,
+        .texture_ids = {0, 1}
     };
-
     Material *materials{&rough_material};
 
     char string_buffers[2][200];
     String texture_files[2]{
-            String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
-            String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
+        String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
+        String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
     };
 
     Texture floor_albedo_map;
     Texture floor_normal_map;
     Texture *textures = &floor_albedo_map;
 
-
-
-    Geometry floor{{{}, {}, {40, 1, 40}}, GeometryType_Quad, MATERIAL_ROUGH};
-    Geometry wall{{{-15, 5, 5}, {0.0f, 0.0f, 90.0f * DEG_TO_RAD}, {4, 1, 8}}, GeometryType_Quad, MATERIAL_MIRROR};
-    Geometry box{{{3, 4, 0}, {0.02f, 0.04f, 0.0f}, {2.5f}}, GeometryType_Box, MATERIAL_GLASS, GEOMETRY_IS_VISIBLE};
-    Geometry tet{{{-3, 4, 12}, {0.02f, 0.04f, 0.06f}, {2.5f}}, GeometryType_Tet, MATERIAL_GLASS, GEOMETRY_IS_VISIBLE};
-    Geometry sphere{{{-9, 5, 3}, {}, {2.5f}}, GeometryType_Sphere, MATERIAL_GLASS, GEOMETRY_IS_VISIBLE};
+    Geometry floor{
+        .transform = {
+            .scale = {40, 1, 40}
+        },
+        .type = GeometryType_Quad,
+        .material_id = MATERIAL_ROUGH
+    };
+    Geometry wall{
+        .transform = {
+            .orientation = {0.0f, 0.0f, 90.0f * DEG_TO_RAD},
+            .position = {-15, 5, 5},
+            .scale = {4, 1, 8}
+        },
+        .type = GeometryType_Quad,
+        .material_id = MATERIAL_MIRROR
+    };
+    Geometry box{
+        .transform = {
+            .orientation = {0.02f, 0.04f, 0.0f},
+            .position = {3, 4, 0},
+            .scale = 2.5f
+        },
+        .type = GeometryType_Box,
+        .material_id = MATERIAL_GLASS,
+        .flags = GEOMETRY_IS_VISIBLE
+    };
+    Geometry tet{
+        .transform = {
+            .orientation = {0.02f, 0.04f, 0.06f},
+            .position = {-3, 4, 12},
+            .scale = 2.5f
+        },
+        .type = GeometryType_Tet,
+        .material_id = MATERIAL_GLASS,
+        .flags = GEOMETRY_IS_VISIBLE
+    };
+    Geometry sphere{
+        .transform = {
+            .position = {-9, 5, 3},
+            .scale = 2.5f
+        },
+        .type = GeometryType_Sphere,
+        .material_id = MATERIAL_GLASS,
+        .flags = GEOMETRY_IS_VISIBLE
+    };
     Geometry *geometries{&floor};
 
-    SceneCounts counts{5, 1, 3, MATERIAL_COUNT, 2};
+    SceneCounts counts{
+        .geometries = 5,
+        .cameras = 1,
+        .lights = 3,
+        .materials = MATERIAL_COUNT,
+        .textures = 2
+    };
     Scene scene{counts, nullptr, geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 
@@ -94,25 +145,10 @@ struct ClassicShadersApp : SlimApp {
 
     // Drawing:
     f32 opacity = 0.2f;
-    quat rotation{tet.transform.rotation};
+    quat rotation{tet.transform.orientation};
 
     ClassicShadersApp() {
         updateSelectionInHUD();
-        rough_material.texture_count = 2;
-        rough_material.texture_ids[0] = 0;
-        rough_material.texture_ids[1] = 1;
-
-        mirror_material.texture_count = 2;
-        mirror_material.texture_ids[0] = 0;
-        mirror_material.texture_ids[1] = 1;
-        mirror_material.uv_repeat = 0.25f;
-        mirror_material.normal_magnitude = 0.1f;
-
-        glass_material.texture_count = 2;
-        glass_material.texture_ids[0] = 0;
-        glass_material.texture_ids[1] = 1;
-        glass_material.uv_repeat = 0.125f;
-        glass_material.normal_magnitude = 0.1f;
     }
 
     void OnRender() override {
@@ -138,27 +174,26 @@ struct ClassicShadersApp : SlimApp {
             Geometry &geo = geometries[i];
             if (!(controls::is_pressed::alt && &geo == selection.geometry) &&
                 geo.type != GeometryType_Quad)
-                geo.transform.rotation = (geo.transform.rotation * rot).normalized();
+                geo.transform.orientation = (geo.transform.orientation * rot).normalized();
         }
     }
 
     // HUD:
-    HUDLine shader_line{ (char*)"Shader : "};
+    HUDLine shader_line{ (char*)"Surface : "};
     HUDLine bounces_line{(char*)"Bounces: "};
     HUD hud{{2}, &shader_line};
 
     void updateSelectionInHUD() {
         char* shader = (char*)"";
         if (selection.geometry) {
-            char* shader = (char*)"";
             switch (selection.geometry->material_id) {
                 case MATERIAL_MIRROR: shader = (char*)"Mirror";  break;
                 case MATERIAL_GLASS : shader = (char*)"Glass";   break;
                 case MATERIAL_ROUGH : shader = (char*)"Lambert"; break;
                 default: break;
             }
-            shader_line.value.string.copyFrom(shader, 0);
         }
+        shader_line.value.string.copyFrom(shader, 0);
         bounces_line.value = (i32)ray_tracer.max_depth;
     }
 

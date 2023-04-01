@@ -9,6 +9,10 @@ struct SceneTracer {
     u32 stack_size = 0;
     u32 *stack = nullptr;
 
+    Ray shadow_ray, _temp_ray;
+    RayHit shadow_hit, _temp_hit;
+    vec3 _closest_hit_ray_direction;
+
     bool scene_has_emissive_quads = false;
 
     INLINE_XPU SceneTracer(Scene &scene, u32 *stack, u32 stack_size, u32 *mesh_stack, u32 mesh_stack_size) :
@@ -31,22 +35,21 @@ struct SceneTracer {
     }
 
     INLINE_XPU bool inShadow(const vec3 &origin, const vec3 &direction, float max_distance = INFINITY) {
-        _shadow_ray.reset(direction.scaleAdd(TRACE_OFFSET, origin), direction);
-        return _trace(_shadow_ray, _shadow_hit, true, max_distance);
+        shadow_ray.origin = origin;
+        shadow_ray.direction = direction;
+        return _trace(shadow_ray, shadow_hit, true, max_distance);
     }
 
-    INLINE_XPU Geometry* findClosestGeometry(const vec3 &origin, const vec3 &direction, RayHit &hit) {
-        _world_ray.reset(direction.scaleAdd(TRACE_OFFSET, origin), direction);
-        Geometry *closest_geometry = _trace(_world_ray, hit);
-        if (closest_geometry) finalizeHit(closest_geometry, hit);
-
+    INLINE_XPU Geometry* findClosestGeometry(Ray &ray, RayHit &hit) {
+        Geometry *closest_geometry = _trace(ray, hit);
+        if (closest_geometry) finalizeHit(closest_geometry, ray, hit);
         return closest_geometry;
     }
 
     INLINE_XPU bool hitGeometryInLocalSpace(const Geometry &geo, const Ray &ray, RayHit &hit, bool any_hit = false) {
         _temp_ray.localize(ray, geo.transform);
-        _temp_ray.pixel_coords = _world_ray.pixel_coords;
-        _temp_ray.depth = _world_ray.depth;
+        _temp_ray.pixel_coords = ray.pixel_coords;
+        _temp_ray.depth = ray.depth;
         switch (geo.type) {
             case GeometryType_Quad  : return _temp_ray.hitsDefaultQuad(       hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
             case GeometryType_Box   : return _temp_ray.hitsDefaultBox(        hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
@@ -57,7 +60,7 @@ struct SceneTracer {
         }
     }
 
-    INLINE_XPU void finalizeHit(Geometry *geometry,  RayHit &hit) {
+    INLINE_XPU void finalizeHit(Geometry *geometry, Ray &ray, RayHit &hit) {
         const vec2 &uv_repeat{scene.materials[geometry->material_id].uv_repeat};
         hit.uv *= uv_repeat;
         if (hit.from_behind) hit.normal = -hit.normal;
@@ -69,16 +72,14 @@ struct SceneTracer {
         hit.uv_coverage /= -(hit.normal.dot(_closest_hit_ray_direction)) * uv_repeat.u * uv_repeat.v;
 
         // Convert Ray Hit to world space, using the "t" value from the local-space trace:
-        hit.position = _world_ray[hit.distance];
+        hit.position = ray[hit.distance];
         hit.normal = geometry->transform.externDir(hit.normal); // Normalized
     }
 
 protected:
-    Ray _shadow_ray, _temp_ray, _world_ray;
-    RayHit _shadow_hit, _temp_hit;
-    vec3 _closest_hit_ray_direction;
 
-    Geometry* _trace(const Ray &ray, RayHit &hit, bool any_hit = false, f32 max_distance = INFINITY) {
+    Geometry* _trace(Ray &ray, RayHit &hit, bool any_hit = false, f32 max_distance = INFINITY) {
+        ray.reset(ray.direction.scaleAdd(TRACE_OFFSET, ray.origin), ray.direction);
         hit.distance = max_distance;
 
         bool hit_left, hit_right;

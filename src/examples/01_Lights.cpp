@@ -10,30 +10,37 @@
 struct LightsApp : SlimApp {
     // Viewport:
     Camera camera{
-            {-4, 15, -17},
-            {-25 * DEG_TO_RAD, 0, 0}
+        .orientation = {-25 * DEG_TO_RAD, 0, 0},
+        .position = {-4, 15, -17}
     }, *cameras{&camera};
     Canvas canvas;
-    Viewport viewport{canvas,&camera};
+    Viewport viewport{canvas, &camera};
 
     // Scene:
     Light key_light{
-        {20, 20, -5},
-        {1.0f, 1.0f, 0.65f},
-        1.1f * 150.0f};
+        .color = {1.0f, 1.0f, 0.65f},
+        .position_or_direction = {20, 20, -5},
+        .intensity = 1.1f * 150.0f
+    };
     Light fill_light{
-        {-20, 20, -5},
-        {0.65f, 0.65f, 1.0f},
-        1.2f * 150.0f
+        .color = {0.65f, 0.65f, 1.0f},
+        .position_or_direction = {-20, 20, -5},
+        .intensity = 1.2f * 150.0f
     };
     Light rim_light{
-        {2, 5, 10},
-        {1.0f, 0.25f, 0.25f},
-        0.9f * 150.0f
+        .color = {1.0f, 0.25f, 0.25f},
+        .position_or_direction = {2, 5, 10},
+        .intensity = 0.9f * 150.0f
     };
     Light *lights{&key_light};
 
-    Material floor_material{BRDF_CookTorrance, 0.2f, 0.0f, MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
+    Material floor_material{
+        .roughness = 0.2f,
+        .flags = MATERIAL_HAS_NORMAL_MAP |
+                 MATERIAL_HAS_ALBEDO_MAP,
+        .texture_count = 2,
+        .texture_ids = {0, 1}
+    };
     Material *materials{&floor_material};
 
     char string_buffers[2][200];
@@ -46,10 +53,21 @@ struct LightsApp : SlimApp {
     Texture floor_normal_map;
     Texture *textures = &floor_albedo_map;
 
-    Geometry plane{{{}, {}, {40, 1, 40}}, GeometryType_Quad};
+    Geometry plane{
+        .transform = {
+            .scale = {40, 1, 40}
+        },
+        .type = GeometryType_Quad
+    };
     Geometry *geometries{&plane};
 
-    SceneCounts counts{1, 1, 3, 1, 2};
+    SceneCounts counts{
+        .geometries = 1,
+        .cameras = 1,
+        .lights = 3,
+        .materials = 1,
+        .textures = 2
+    };
     Scene scene{counts, nullptr, geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 
@@ -87,12 +105,6 @@ struct LightsApp : SlimApp {
                          true};
     HUDSettings hud_settings{6};
     HUD hud{hud_settings, &FPS_hud_line};
-
-    LightsApp() {
-        floor_material.texture_count = 2;
-        floor_material.texture_ids[0] = 0;
-        floor_material.texture_ids[1] = 1;
-    }
 
     void OnUpdate(f32 delta_time) override {
         FPS_hud_line.value = (i32)render_timer.average_frames_per_second;

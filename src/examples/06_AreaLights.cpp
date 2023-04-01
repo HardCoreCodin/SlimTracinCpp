@@ -1,211 +1,211 @@
-#include "../SlimTracin/app.h"
-#include "../SlimTracin/core/time.h"
-#include "../SlimTracin/viewport/hud.h"
-#include "../SlimTracin/viewport/navigation.h"
-#include "../SlimTracin/viewport/manipulation.h"
-#include "../SlimTracin/render/raytracer.h"
+#include "../slim/scene/selection.h"
+#include "../slim/draw/hud.h"
+#include "../slim/draw/selection.h"
+#include "../slim/renderer/raytracer.h"
+#include "../slim/app.h"
 
-enum LIGHT {
-    LIGHT_KEY,
-    LIGHT_RIM,
-    LIGHT_FILL,
-    LIGHT_COUNT
-};
-enum PRIM {
-    PRIM_FLOOR,
-    PRIM_LIGHT1,
-    PRIM_LIGHT2,
-    PRIM_SPHERE1,
-    PRIM_SPHERE2,
-    PRIM_COUNT
-};
-enum MATERIAL {
-    MATERIAL_ROUGH,
-    MATERIAL_LIGHT1,
-    MATERIAL_LIGHT2,
-    MATERIAL_COUNT
-};
-enum HUD_LINE {
-    HUD_LINE_SHADING,
-    HUD_LINE_TRANSPARENT,
-    HUD_LINE_COUNT
-};
-void updateSceneSelectionInHUD(Scene *scene, Viewport *viewport) {
-    Primitive *prim = scene->selection->primitive;
-    char* shader = "";
-    char* transparent = "";
-    if (prim) {
-        shader = prim->material_id ? "Lambert" : "Emissive";
-        transparent = prim->flags & IS_TRANSPARENT ? "On" : "Off";
+
+// Or using the single-header file:
+//#include "../slim.h"
+
+struct AreaLightsApp : SlimApp {
+    // Viewport:
+    Camera camera{
+        .orientation = {-25 * DEG_TO_RAD, 0, 0},
+        .position = {-4, 15, -17}
+    }, *cameras{&camera};
+    Canvas canvas;
+    Viewport viewport{canvas, &camera};
+
+    // Scene:
+    Light key_light{
+        .color = {1.0f, 1.0f, 0.65f},
+        .position_or_direction = {20, 20, -5},
+        .intensity = 1.1f * 150.0f
+    };
+    Light fill_light{
+        .color = {0.65f, 0.65f, 1.0f},
+        .position_or_direction = {-20, 20, -5},
+        .intensity = 1.2f * 150.0f
+    };
+    Light rim_light{
+        .color = {1.0f, 0.25f, 0.25f},
+        .position_or_direction = {2, 5, 10},
+        .intensity = 0.9f * 150.0f
+    };
+    Light *lights{&key_light};
+
+    Material shapes_material{
+        .albedo = {0.8f, 1.0f, 0.8f}
+    };
+    Material emissive_material1{
+        .albedo = Black,
+        .reflectivity = Black,
+        .emission = {0.9f, 0.7f, 0.7f},
+        .roughness = 0.0f,
+        .flags = MATERIAL_IS_EMISSIVE
+    };
+    Material emissive_material2{
+        .albedo = Black,
+        .reflectivity = Black,
+        .emission = {0.7f, 0.7f, 0.9f},
+        .roughness = 0.0f,
+        .flags = MATERIAL_IS_EMISSIVE
+    };
+    Material floor_material{
+        .roughness = 0.2f,
+        .flags = MATERIAL_HAS_NORMAL_MAP |
+                 MATERIAL_HAS_ALBEDO_MAP,
+        .texture_count = 2,
+        .texture_ids = {0, 1}
+    };
+    Material *materials{&shapes_material};
+
+    char string_buffers[2][200];
+    String texture_files[2]{
+        String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
+        String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
+    };
+
+    Texture floor_albedo_map;
+    Texture floor_normal_map;
+    Texture *textures = &floor_albedo_map;
+
+    Geometry plane1{
+        .transform = {
+            .orientation = {0.0f, 0.0f, -90.f * DEG_TO_RAD},
+            .position = {-15, 5, 5},
+            .scale = {4, 1, 8}
+        },
+        .type = GeometryType_Quad
+    };
+    Geometry plane2{
+        .transform = {
+            .orientation = {0.0f, 0.0f, 90.f * DEG_TO_RAD},
+            .position = {15, 5, 5},
+            .scale = {4, 1, 8}
+        },
+        .type = GeometryType_Quad,
+        .material_id = 2
+    };
+    Geometry sphere1{
+        .transform = {
+            .position = {-3, 6, 14},
+            .scale = {4, 3, 2}
+        },
+        .type = GeometryType_Sphere
+    };
+    Geometry sphere2{
+        .transform = {
+            .position = {3, 6, 2},
+            .scale = {2, 4, 3}
+        },
+        .type = GeometryType_Sphere
+    };
+    Geometry floor{
+        .transform = {
+            .scale = {40, 1, 40}
+        },
+        .type = GeometryType_Quad,
+        .material_id = 3
+    };
+    Geometry *geometries{&plane1};
+
+    SceneCounts counts{
+        .geometries = 5,
+        .cameras = 1,
+        .lights = 3,
+        .materials = 3,
+        .textures = 2
+    };
+    Scene scene{counts, nullptr, geometries, cameras, lights, materials, textures, texture_files};
+    Selection selection;
+
+    RayTracer ray_tracer{scene, (u8)counts.geometries, scene.mesh_stack_size};
+
+    // Drawing:
+    f32 opacity = 0.2f;
+
+    void OnUpdate(f32 delta_time) override {
+        if (!mouse::is_captured) selection.manipulate(viewport, scene);
+        if (!controls::is_pressed::alt) viewport.updateNavigation(delta_time);
     }
-    HUDLine *lines = viewport->hud.lines;
-    setString(&lines[HUD_LINE_SHADING    ].value.string, shader);
-    setString(&lines[HUD_LINE_TRANSPARENT].value.string, transparent);
-}
-void updateViewport(Viewport *viewport, Mouse *mouse) {
-    if (mouse->is_captured) {
-        if (mouse->moved)         orientViewport(viewport, mouse);
-        if (mouse->wheel_scrolled)  zoomViewport(viewport, mouse);
-    } else if (!(mouse->wheel_scrolled && app->controls.is_pressed.shift)) {
-        if (mouse->wheel_scrolled) dollyViewport(viewport, mouse);
-        if (mouse->moved) {
-            if (mouse->middle_button.is_pressed)
-                panViewport(viewport, mouse);
 
-            if (mouse->right_button.is_pressed &&
-                !app->controls.is_pressed.alt)
-                orbitViewport(viewport, mouse);
-        }
+    void OnRender() override {
+        canvas.clear();
+
+        ray_tracer.render(viewport);
+        if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
+        if (hud.enabled) drawHUD(hud, canvas);
+
+        canvas.drawToWindow();
     }
-    if (viewport->navigation.turned ||
-        viewport->navigation.moved ||
-        viewport->navigation.zoomed)
-        updateSceneSSB(&app->scene, viewport);
-}
-void updateAndRender() {
-    Timer *timer = &app->time.timers.update;
-    Scene *scene       = &app->scene;
-    Viewport *viewport = &app->viewport;
-    Controls *controls = &app->controls;
-    Mouse *mouse = &controls->mouse;
 
-    beginFrame(timer);
-        if (mouse->is_captured)
-            navigateViewport(viewport, timer->delta_time);
-        else
-            manipulateSelection(scene, viewport, controls);
+    // HUD:
+    HUDLine Transparent_hud_line{(char*)"Transparent : ",
+                                 (char*)"On",
+                                 (char*)"Off",
+                                 &transparent,
+                                 true};
+    HUDLine Material_hud_line{(char*)"Material : "};
+    HUD hud{{2}, &Transparent_hud_line};
 
-        if (scene->selection->changed) {
-            scene->selection->changed = false;
-            updateSceneSelectionInHUD(scene, viewport);
-        }
-        if (!(controls->is_pressed.alt))
-            updateViewport(viewport, mouse);
+    bool transparent = false;
 
-        beginDrawing(viewport);
-            renderScene(scene, viewport);
-            drawSelection(scene, viewport, controls);
-        endDrawing(viewport);
-    endFrame(timer, mouse);
-}
-void onKeyChanged(u8 key, bool is_pressed) {
-    Viewport *viewport = &app->viewport;
-    NavigationMove* move = &app->viewport.navigation.move;
-    if (key == 'R') move->up       = is_pressed;
-    if (key == 'F') move->down     = is_pressed;
-    if (key == 'W') move->forward  = is_pressed;
-    if (key == 'A') move->left     = is_pressed;
-    if (key == 'S') move->backward = is_pressed;
-    if (key == 'D') move->right    = is_pressed;
-    Scene *scene = &app->scene;
-    Primitive *prim = scene->selection->primitive;
-    ViewportSettings *settings = &viewport->settings;
-    if (is_pressed) {
-        if (prim) {
-            if (key == 'Z' || key == 'X') {
-                char inc = key == 'X' ? 1 : -1;
-                prim->material_id = (prim->material_id + inc + MATERIAL_COUNT) % MATERIAL_COUNT;
-                uploadPrimitives(scene);
-            } else if (key == 'T') {
-                if (prim->flags & IS_TRANSPARENT)
-                    prim->flags &= ~IS_TRANSPARENT;
+    void OnKeyChanged(u8 key, bool is_pressed) override {
+        if (!is_pressed) {
+            if (key == 'T' && selection.geometry) {
+                u8 &flags = selection.geometry->flags;
+                if (flags & GEOMETRY_IS_TRANSPARENT)
+                    flags &= ~GEOMETRY_IS_TRANSPARENT;
                 else
-                    prim->flags |= IS_TRANSPARENT;
-                uploadMaterials(scene);
+                    flags |= GEOMETRY_IS_TRANSPARENT;
+
+                transparent = flags & GEOMETRY_IS_TRANSPARENT;
             }
-            updateSceneSelectionInHUD(scene, viewport);
+            if ((key == 'Z' || key == 'X') && selection.geometry) {
+                Geometry &geo = *selection.geometry;
+                char inc = key == 'X' ? 1 : -1;
+                if (controls::is_pressed::ctrl) {
+                    Material &M = scene.materials[geo.material_id];
+                    M.roughness = clampedValue(M.roughness + (f32)inc * 0.05f, 0.05f, 1.0f);
+                } else
+                    geo.material_id = (geo.material_id + inc + counts.materials) % counts.materials;
+
+                Material_hud_line.value.string.copyFrom(selection.geometry ? (
+                        selection.geometry ? (char*)"PBR" : (char*)"Emissive"
+                        ) : (char*)"", 0);
+            }
+            if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
         }
-    } else if (key == app->controls.key_map.tab) settings->show_hud = !settings->show_hud;
-}
-void onMouseButtonDown(MouseButton *mouse_button) {
-    app->controls.mouse.pos_raw_diff = Vec2i(0, 0);
-}
-void onMouseDoubleClicked(MouseButton *mouse_button) {
-    Mouse *mouse = &app->controls.mouse;
-    if (mouse_button == &mouse->left_button) {
-        mouse->is_captured = !mouse->is_captured;
-        mouse->pos_raw_diff = Vec2i(0, 0);
-        app->platform.setCursorVisibility(!mouse->is_captured);
-        app->platform.setWindowCapture(    mouse->is_captured);
+        Move &move = viewport.navigation.move;
+        Turn &turn = viewport.navigation.turn;
+        if (key == 'Q') turn.left     = is_pressed;
+        if (key == 'E') turn.right    = is_pressed;
+        if (key == 'R') move.up       = is_pressed;
+        if (key == 'F') move.down     = is_pressed;
+        if (key == 'W') move.forward  = is_pressed;
+        if (key == 'S') move.backward = is_pressed;
+        if (key == 'A') move.left     = is_pressed;
+        if (key == 'D') move.right    = is_pressed;
     }
-}
-void setupViewport(Viewport *viewport) {
-    HUD *hud = &viewport->hud;
-    HUDLine *lines = hud->lines;
-    hud->line_height = 1.2f;
-    hud->position.x = hud->position.y = 10;
-    setString(&lines[HUD_LINE_SHADING].title,     (char*)"Shading    : ");
-    setString(&lines[HUD_LINE_TRANSPARENT].title, (char*)"Transparent: ");
-    setString(&lines[HUD_LINE_SHADING].value.string,(char*)"");
-    setString(&lines[HUD_LINE_TRANSPARENT].value.string, (char*)"Off");
-}
-void setupScene(Scene *scene) {
-    { // Setup Camera:
-        Camera *camera = scene->cameras;
-        camera->transform.position.y = 7;
-        camera->transform.position.z = -11;
-        rotateXform3(&camera->transform, 0, -0.2f, 0);
+    void OnWindowResize(u16 width, u16 height) override {
+        viewport.updateDimensions(width, height);
+        canvas.dimensions.update(width, height);
     }
-    { // Setup Lights:
-        scene->ambient_light.color = Vec3(0.004f, 0.004f, 0.007f);
-        Light *key = scene->lights + LIGHT_KEY;
-        Light *rim = scene->lights + LIGHT_RIM;
-        Light *fill = scene->lights + LIGHT_FILL;
-        key->intensity  = 1.1f * 40.0f;
-        rim->intensity  = 1.2f * 40.0f;
-        fill->intensity = 0.9f * 40.0f;
-        key->color  = Vec3(1.0f, 1.0f, 0.65f);
-        rim->color  = Vec3(1.0f, 0.25f, 0.25f);
-        fill->color = Vec3(0.65f, 0.65f, 1.0f );
-        key->position_or_direction  = Vec3(10, 10, -5);
-        rim->position_or_direction  = Vec3(2, 5, 12);
-        fill->position_or_direction = Vec3(-10, 10, -5);
+    void OnMouseButtonDown(mouse::Button &mouse_button) override {
+        mouse::pos_raw_diff_x = mouse::pos_raw_diff_y = 0;
     }
-    { // Setup Primitives:
-        Primitive *floor   = scene->primitives + PRIM_FLOOR;
-        Primitive *light1  = scene->primitives + PRIM_LIGHT1;
-        Primitive *light2  = scene->primitives + PRIM_LIGHT2;
-        Primitive *sphere1 = scene->primitives + PRIM_SPHERE1;
-        Primitive *sphere2 = scene->primitives + PRIM_SPHERE2;
-        sphere1->type = PrimitiveType_Sphere;
-        sphere2->type = PrimitiveType_Sphere;
-        floor->type   = PrimitiveType_Quad;
-        light1->type  = PrimitiveType_Quad;
-        light2->type  = PrimitiveType_Quad;
-        light1->material_id = MATERIAL_LIGHT1;
-        light2->material_id = MATERIAL_LIGHT2;
-        light1->rotation.axis.z = -HALF_SQRT2;
-        light1->rotation.amount = +HALF_SQRT2;
-        light2->rotation.axis.z = -HALF_SQRT2;
-        light2->rotation.amount = -HALF_SQRT2;
-        sphere1->position = Vec3(+3, 3, 0);
-        sphere2->position = Vec3(-3, 3, 0);
-        light1->position = Vec3(-15, 5, 5);
-        light2->position = Vec3(+15, 5, 5);
-        floor->scale     = Vec3(40, 1, 40);
-        light1->scale    = Vec3(4, 1, 8 );
-        light2->scale    = Vec3(4, 1, 8 );
+    void OnMouseButtonDoubleClicked(mouse::Button &mouse_button) override {
+        if (&mouse_button == &mouse::left_button) {
+            mouse::is_captured = !mouse::is_captured;
+            os::setCursorVisibility(!mouse::is_captured);
+            os::setWindowCapture(    mouse::is_captured);
+            OnMouseButtonDown(mouse_button);
+        }
     }
-    { // Setup Materials:
-        Material *rough  = scene->materials + MATERIAL_ROUGH;
-        Material *light1 = scene->materials + MATERIAL_LIGHT1;
-        Material *light2 = scene->materials + MATERIAL_LIGHT2;
-        light1->is = EMISSIVE;
-        light2->is = EMISSIVE;
-        light1->emission = Vec3(0.9f, 0.7f, 0.7f);
-        light2->emission = Vec3(0.7f, 0.7f, 0.9f);
-        rough->albedo  = Vec3(0.8f, 1.0f, 0.8f);
-    }
-}
-void initApp(Defaults *defaults) {
-    defaults->settings.scene.materials  = MATERIAL_COUNT;
-    defaults->settings.scene.lights     = LIGHT_COUNT;
-    defaults->settings.scene.primitives = PRIM_COUNT;
-    defaults->settings.viewport.hud_line_count = HUD_LINE_COUNT;
-    app->on.sceneReady    = setupScene;
-    app->on.viewportReady = setupViewport;
-    app->on.windowRedraw  = updateAndRender;
-    app->on.keyChanged               = onKeyChanged;
-    app->on.mouseButtonDown          = onMouseButtonDown;
-    app->on.mouseButtonDoubleClicked = onMouseDoubleClicked;
+};
+
+SlimApp* createApp() {
+    return (SlimApp*)new AreaLightsApp();
 }
