@@ -14,7 +14,7 @@ struct MeshesApp : SlimApp {
     // Viewport:
     Camera camera{
         .orientation = {-25 * DEG_TO_RAD, 0, 0},
-        .position = {-4, 15, -17}
+        .position = {0, 7, -11}
     }, *cameras{&camera};
     Canvas canvas;
     Viewport viewport{canvas,&camera};
@@ -22,28 +22,36 @@ struct MeshesApp : SlimApp {
     // Scene:
     Light key_light{
         .color = {1.0f, 1.0f, 0.65f},
-        .position_or_direction = {20, 20, -5},
-        .intensity = 1.1f * 150.0f
+        .position_or_direction = {10, 10, -5},
+        .intensity = 1.1f * 40.0f
     };
     Light fill_light{
         .color = {0.65f, 0.65f, 1.0f},
-        .position_or_direction = {-20, 20, -5},
-        .intensity = 1.2f * 150.0f
+        .position_or_direction = {-10, 10, -5},
+        .intensity = 1.2f * 40.0f
     };
     Light rim_light{
         .color = {1.0f, 0.25f, 0.25f},
-        .position_or_direction = {5, 5, 20},
-        .intensity = 0.9f * 150.0f
+        .position_or_direction = {2, 5, 12},
+        .intensity = 0.9f * 40.0f
     };
     Light *lights{&key_light};
 
     Material shapes_material{
         .albedo = {0.8f, 1.0f, 0.8f},
-        .brdf = BRDF_Lambert
+        .roughness = 0.7f
+    };
+    Material dog_material{
+        .roughness = 0.2f,
+        .normal_magnitude = 4.0f,
+        .flags = MATERIAL_HAS_NORMAL_MAP |
+                 MATERIAL_HAS_ALBEDO_MAP,
+        .texture_count = 2,
+        .texture_ids = {2, 3}
     };
     Material floor_material{
+        .albedo = {0.8f, 0.8f, 0.8f},
         .roughness = 0.2f,
-        .brdf = BRDF_CookTorrance,
         .flags = MATERIAL_HAS_NORMAL_MAP |
                  MATERIAL_HAS_ALBEDO_MAP,
         .texture_count = 2,
@@ -51,25 +59,30 @@ struct MeshesApp : SlimApp {
     };
     Material *materials{&shapes_material};
 
-    char string_buffers[2][200];
-    String texture_files[2]{
+    char string_buffers[4][200];
+    String texture_files[4]{
         String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
-        String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
+        String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__),
+        String::getFilePath((char*)"dog_albedo.texture",string_buffers[2],(char*)__FILE__),
+        String::getFilePath((char*)"dog_normal.texture",string_buffers[3],(char*)__FILE__)
     };
 
     Texture floor_albedo_map;
     Texture floor_normal_map;
+    Texture dog_albedo_map;
+    Texture dog_normal_map;
     Texture *textures = &floor_albedo_map;
 
     Geometry dog{
         .transform = {
-            .position = {4, 2, 8}
+            .position = {0, 2, -1}
         },
-        .type = GeometryType_Mesh
+        .type = GeometryType_Mesh,
+        .material_id = 1
     };
     Geometry dragon{
         .transform = {
-            .position = {0, 2, -1}
+            .position = {4, 2, 8}
         },
         .type = GeometryType_Mesh,
         .id = 1
@@ -81,29 +94,33 @@ struct MeshesApp : SlimApp {
         .type = GeometryType_Mesh,
         .id = 2
     };
+
     Geometry floor{
         .transform = {
-            .scale = {40, 1, 40}
+            .scale = {40, 0.1f, 40}
         },
         .type = GeometryType_Quad,
-        .material_id = 1
+        .material_id = 2
     };
     Geometry *geometries{&dog};
 
     char strings[3][100] = {};
     String mesh_files[3] = {
-        String::getFilePath((char*)"suzanne.mesh",strings[0],(char*)__FILE__),
-        String::getFilePath((char*)"dog.mesh" ,strings[1],(char*)__FILE__),
-        String::getFilePath((char*)"cube.mesh" ,strings[2],(char*)__FILE__)
+        String::getFilePath((char*)"dog.mesh" ,strings[0],(char*)__FILE__),
+        String::getFilePath((char*)"dragon.mesh" ,strings[1],(char*)__FILE__),
+        String::getFilePath((char*)"monkey.mesh",strings[2],(char*)__FILE__)
     };
-    Mesh meshes[3];
+    Mesh dog_mesh;
+    Mesh dragon_mesh;
+    Mesh monkey_mesh;
+    Mesh *meshes{&dog_mesh};
 
     SceneCounts counts{
         .geometries = 4,
         .cameras = 1,
         .lights = 3,
-        .materials = 2,
-        .textures = 2,
+        .materials = 3,
+        .textures = 4,
         .meshes = 3
     };
     Scene scene{counts, nullptr, geometries, cameras, lights, materials, textures, texture_files,
@@ -152,7 +169,6 @@ struct MeshesApp : SlimApp {
         canvas.clear();
 
         ray_tracer.render(viewport);
-
         if (draw_TLAS) {
             if (ray_tracer.use_ssb)
                 drawSSB(scene, canvas);
@@ -181,14 +197,14 @@ struct MeshesApp : SlimApp {
         f32 dragon_scale = sinf(elapsed * 2.5f) * 0.04f;
         f32 monkey_scale = sinf(elapsed * 2.5f + 1) * 0.05f;
 
-        dog.transform.scale = 0.4f + dog_scale;
+        dog.transform.scale = 0.8f + dog_scale;
         dog.transform.scale.y += 2 * dog_scale;
         dragon.transform.scale = 0.4f - dragon_scale;
         dragon.transform.scale.y += 2 * dragon_scale;
         monkey.transform.scale = 0.3f + monkey_scale;
         monkey.transform.scale.y -= 2 * monkey_scale;
 
-        quat rot = quat::RotationAroundY(delta_time * 0.015f);
+        quat rot = quat::RotationAroundY(delta_time * 0.15f);
         if (!(controls::is_pressed::alt && selection.geometry == &dragon))
             dragon.transform.orientation *= rot;
 

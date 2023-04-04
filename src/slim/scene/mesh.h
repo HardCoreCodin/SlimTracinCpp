@@ -18,8 +18,9 @@ union TriangleVertexIndices {
 
 struct Triangle {
     mat3 local_to_tangent;
-    vec3 position, normal, U, V;
-    f32 area_of_parallelogram, area_of_uv;
+    vec3 position, normal, n1, n2, n3;
+    vec2 uv1, uv2, uv3;
+    f32 uv_coverage, padding;
 };
 
 struct Mesh {

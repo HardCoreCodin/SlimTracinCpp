@@ -50,12 +50,15 @@ struct SceneTracer {
         _temp_ray.localize(ray, geo.transform);
         _temp_ray.pixel_coords = ray.pixel_coords;
         _temp_ray.depth = ray.depth;
+//        if (geo.type == GeometryType_Mesh)
+//            return false;
         switch (geo.type) {
             case GeometryType_Quad  : return _temp_ray.hitsDefaultQuad(       hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
             case GeometryType_Box   : return _temp_ray.hitsDefaultBox(        hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
             case GeometryType_Sphere: return _temp_ray.hitsDefaultSphere(     hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
             case GeometryType_Tet   : return _temp_ray.hitsDefaultTetrahedron(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
-            case GeometryType_Mesh  : return mesh_tracer.trace(scene.meshes[geo.id], _temp_ray, hit, any_hit);
+            case GeometryType_Mesh  :
+                return mesh_tracer.trace(scene.meshes[geo.id], _temp_ray, hit, any_hit);
             default: return false;
         }
     }
@@ -83,13 +86,13 @@ protected:
         hit.distance = max_distance;
 
         bool hit_left, hit_right;
-        f32 left_distance, right_distance;
-        if (!(ray.hitsAABB(scene.bvh.nodes->aabb, left_distance) && left_distance < hit.distance))
+        f32 left_near_distance, right_near_distance, left_far_distance, right_far_distance;
+        if (!(ray.hitsAABB(scene.bvh.nodes->aabb, left_near_distance, left_far_distance) && left_near_distance < hit.distance))
             return nullptr;
 
         u32 *indices = scene.bvh_leaf_geometry_indices;
         if (unlikely(scene.bvh.nodes->leaf_count))
-            return _hitGeometries(indices, scene.counts.geometries, ray, hit, any_hit);
+            return _hitGeometries(indices, scene.counts.geometries, left_far_distance, ray, hit, any_hit);
 
         BVHNode *left_node = scene.bvh.nodes + scene.bvh.nodes->first_index;
         BVHNode *right_node, *tmp_node;
@@ -99,12 +102,12 @@ protected:
         while (true) {
             right_node = left_node + 1;
 
-            hit_left  = ray.hitsAABB(left_node->aabb, left_distance) && left_distance < hit.distance;
-            hit_right = ray.hitsAABB(right_node->aabb, right_distance) && right_distance < hit.distance;
+            hit_left  = ray.hitsAABB(left_node->aabb, left_near_distance, left_far_distance) && left_near_distance < hit.distance;
+            hit_right = ray.hitsAABB(right_node->aabb, right_near_distance, right_far_distance) && right_near_distance < hit.distance;
 
             if (hit_left) {
                 if (unlikely(left_node->leaf_count)) {
-                    hit_geo = _hitGeometries(indices + left_node->first_index, left_node->leaf_count, ray, hit, any_hit);
+                    hit_geo = _hitGeometries(indices + left_node->first_index, left_node->leaf_count, left_far_distance, ray, hit, any_hit);
                     if (hit_geo) {
                         closest_hit_geo = hit_geo;
                         if (any_hit)
@@ -118,7 +121,7 @@ protected:
 
             if (hit_right) {
                 if (unlikely(right_node->leaf_count)) {
-                    hit_geo = _hitGeometries(indices + right_node->first_index, right_node->leaf_count, ray, hit, any_hit);
+                    hit_geo = _hitGeometries(indices + right_node->first_index, right_node->leaf_count, right_far_distance, ray, hit, any_hit);
                     if (hit_geo) {
                         closest_hit_geo = hit_geo;
                         if (any_hit)
@@ -131,7 +134,7 @@ protected:
 
             if (left_node) {
                 if (right_node) {
-                    if (!any_hit && left_distance > right_distance) {
+                    if (!any_hit && left_near_distance > right_near_distance) {
                         tmp_node = left_node;
                         left_node = right_node;
                         right_node = tmp_node;
@@ -150,7 +153,7 @@ protected:
         return closest_hit_geo;
     }
 
-    Geometry* _hitGeometries(const u32 *geometry_indices, u32 geo_count, const Ray &ray, RayHit &hit, bool any_hit) {
+    Geometry* _hitGeometries(const u32 *geometry_indices, u32 geo_count, f32 closest_distance, const Ray &ray, RayHit &hit, bool any_hit) {
         Geometry *geo, *hit_geo = nullptr;
         u8 visibility_flag = any_hit ? GEOMETRY_IS_SHADOWING : GEOMETRY_IS_VISIBLE;
 

@@ -118,8 +118,6 @@ struct BVHBuildIteration {
     u8 depth;
 };
 
-#define MAX_TRIANGLES_PER_MESH_BVH_NODE 4
-
 struct BVHBuilder {
     BVHNode *nodes;
     BVHPartition partitions[3];
@@ -266,7 +264,6 @@ struct BVHBuilder {
 
     void buildMesh(Mesh &mesh) {
         vec3 v1, v2, v3;
-        vec2 uv1, uv2, uv3;
         TriangleVertexIndices indices{};
 
         BVHNode *node = nodes;
@@ -278,8 +275,8 @@ struct BVHBuilder {
             v2 = mesh.vertex_positions[indices.ids[1]];
             v3 = mesh.vertex_positions[indices.ids[2]];
 
-            vec3 &min = nodes->aabb.min;
-            vec3 &max = nodes->aabb.max;
+            vec3 &min = node->aabb.min;
+            vec3 &max = node->aabb.max;
             min = minimum(minimum(v1, v2), v3);
             max = maximum(maximum(v1, v2), v3);
 
@@ -306,7 +303,7 @@ struct BVHBuilder {
         }
 
         build(mesh.bvh, mesh.triangle_count, MAX_TRIANGLES_PER_MESH_BVH_NODE);
-
+        f32 area_of_uv, area_of_parallelogram;
         u32 *triangle_id = leaf_ids;
         for (u32 i = 0; i < mesh.triangle_count; i++, triangle_id++) {
             indices = mesh.vertex_position_indices[*triangle_id];
@@ -315,23 +312,32 @@ struct BVHBuilder {
             v3 = mesh.vertex_positions[indices.ids[2]];
 
             Triangle &triangle = mesh.triangles[i];
-            triangle.U = v3 - v1;
-            triangle.V = v2 - v1;
-            triangle.normal = triangle.U.cross(triangle.V);
-            triangle.area_of_parallelogram = triangle.normal.length();
-            triangle.normal /= triangle.area_of_parallelogram;
+            triangle.local_to_tangent.X = v3 - v1;
+            triangle.local_to_tangent.Y = v2 - v1;
+            triangle.local_to_tangent.Z = triangle.local_to_tangent.X.cross(triangle.local_to_tangent.Y);
+            area_of_parallelogram = triangle.local_to_tangent.Z.length();
+            triangle.normal = triangle.local_to_tangent.Z = triangle.local_to_tangent.Z / area_of_parallelogram;
             triangle.position = v1;
-            triangle.local_to_tangent.X = triangle.U;
-            triangle.local_to_tangent.Y = triangle.V;
-            triangle.local_to_tangent.Z = triangle.normal;
             triangle.local_to_tangent = triangle.local_to_tangent.inverted();
+            triangle.uv_coverage = 1.0f;
+
+            if (mesh.normals_count) {
+                indices = mesh.vertex_normal_indices[*triangle_id];
+                triangle.n1 = mesh.vertex_normals[indices.v1];
+                triangle.n2 = mesh.vertex_normals[indices.v2];
+                triangle.n3 = mesh.vertex_normals[indices.v3];
+            }
 
             if (mesh.uvs_count) {
                 indices = mesh.vertex_uvs_indices[*triangle_id];
-                uv1 = mesh.vertex_uvs[indices.v1];
-                uv2 = mesh.vertex_uvs[indices.v2];
-                uv3 = mesh.vertex_uvs[indices.v3];
-                triangle.area_of_uv = fabsf((uv2.u-uv1.u) * (uv3.v-uv1.v) - (uv3.u-uv1.u) * (uv2.v-uv1.v));
+                triangle.uv1 = mesh.vertex_uvs[indices.v1];
+                triangle.uv2 = mesh.vertex_uvs[indices.v2];
+                triangle.uv3 = mesh.vertex_uvs[indices.v3];
+                area_of_uv = fabsf(
+                    (triangle.uv2.u - triangle.uv1.u) * (triangle.uv3.v - triangle.uv1.v) -
+                       (triangle.uv3.u - triangle.uv1.u) * (triangle.uv2.v - triangle.uv1.v)
+                       );
+                triangle.uv_coverage = area_of_uv / area_of_parallelogram;
             }
         }
     }

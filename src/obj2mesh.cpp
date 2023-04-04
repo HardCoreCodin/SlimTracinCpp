@@ -16,7 +16,7 @@
 #include "./slim/serialization/mesh.h"
 
 // Or using the single-header file:
-// #include "../slim.H"
+// #include "../slim.h"
 
 enum VertexAttributes {
     VertexAttributes_None,
@@ -51,7 +51,7 @@ int obj2mesh(char* obj_file_path, char* mesh_file_path, bool invert_winding_orde
 
     FILE* obj_file;
 
-    obj_file = fopen(obj_file_path, "R");
+    obj_file = fopen(obj_file_path, "r");
     char line[1024];
 
     enum VertexAttributes vertex_attributes = VertexAttributes_None;
@@ -139,7 +139,7 @@ int obj2mesh(char* obj_file_path, char* mesh_file_path, bool invert_winding_orde
     TriangleVertexIndices *vertex_normal_indices = mesh.vertex_normal_indices;
     TriangleVertexIndices *vertex_uvs_indices = mesh.vertex_uvs_indices;
 
-    obj_file = fopen(obj_file_path, (char*)"R");
+    obj_file = fopen(obj_file_path, (char*)"r");
     while (fgets(line, 1024, obj_file)) {
         // Vertex information
         if (strncmp(line, (char*)"v ", 2) == 0) {
@@ -292,5 +292,5 @@ int main(int argc, char *argv[]) {
 }
 
 
-//suzanne.obj suzanne.mesh -invert_winding_order scale:2 rotY:90
+//suzanne.obj monkey.mesh -invert_winding_order scale:2 rotY:90
 //dog.obj dog.mesh -invert_winding_order scale:0.1 rotY:135

@@ -35,3 +35,29 @@ add_executable(obj2mesh src/obj2mesh.cpp)
 
 project(bmp2texture)
 add_executable(bmp2texture src/bmp2texture.cpp)
+
+
+add_compile_options(
+        $<$<CONFIG:RELEASE>:-O3>
+        $<$<CONFIG:RELEASE>:-Oi>
+        $<$<CONFIG:RELEASE>:-Mt>
+        $<$<CONFIG:DEBUG>:-JMC>
+        $<$<CONFIG:DEBUG>:-MTd>
+        $<$<CONFIG:DEBUG>:-Z7>
+        -WX-
+        -W4
+        -wd4100
+        -GR-
+        -EHa-
+        -GL
+        -GS
+        -FC
+        -permissive-
+        -sdl
+        -nologo
+        -analyze-
+        -fp:fast
+        -Zc:inline
+        -diagnostics:caret
+        -errorReport:none
+)

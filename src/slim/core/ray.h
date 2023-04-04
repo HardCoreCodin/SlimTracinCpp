@@ -47,13 +47,14 @@ struct Ray {
         octant_shifts = faces;
     }
 
-    INLINE_XPU bool hitsAABB(const AABB &aabb, f32 &distance) const {
+    INLINE_XPU bool hitsAABB(const AABB &aabb, f32 &near_distance, f32 &far_distance) const {
         vec3 min_t{*(&aabb.min.x + octant_shifts.x), *(&aabb.min.y + octant_shifts.y), *(&aabb.min.z + octant_shifts.z)};
         vec3 max_t{*(&aabb.max.x - octant_shifts.x), *(&aabb.max.y - octant_shifts.y), *(&aabb.max.z - octant_shifts.z)};
         min_t = min_t.mulAdd(direction_reciprocal, scaled_origin);
         max_t = max_t.mulAdd(direction_reciprocal, scaled_origin);
-        distance = Max(0, min_t.maximum());
-        return distance <= max_t.minimum();
+        near_distance = Max(0, min_t.maximum());
+        far_distance = max_t.minimum();
+        return near_distance <= far_distance;
     }
 
     INLINE_XPU bool hitsPlane(const vec3 &plane_origin, const vec3 &plane_normal, RayHit &hit) const {
@@ -71,8 +72,6 @@ struct Ray {
             return false;
 
         f32 t =  NdotRoP / NdotRd;
-        if (t > hit.distance)
-            return false;
 
         hit.distance = t;
         hit.position = at(t);
