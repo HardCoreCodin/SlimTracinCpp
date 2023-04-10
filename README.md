@@ -79,11 +79,11 @@ The following example apps demonstrate how to use <b>SlimTracin</b>'s features:<
 * <b><u>Render Modes</b>:</u> Beauty, Depth, Normals, UVs and BVHs<br>
   <img src="src/examples/08_Modes.gif" alt="08_Modes"><br>
   <p float="left">
-    <img src="src/examples/08_Modes_update.png" alt="08_Modes_update" width="380">
-    <img src="src/examples/08_Modes_setup.png" alt="08_Modes_setup" width="360">
+    <img src="src/examples/07_Modes_update.png" alt="08_Modes_update" width="380">
+    <img src="src/examples/07_Modes_setup.png" alt="08_Modes_setup" width="360">
   </p>
   BVHs can be shown as a wireframe overlay in any render mode.<br>
-  <img src="src/examples/08_Modes_BVH.gif" alt="08_Modes_BVH"><br>
+  <img src="src/examples/07_Meshes_BVH.gif" alt="08_Modes_BVH"><br>
   The BVH of the scene updates dynamically as primitives are transformed.<br>
   The BVH of meshes are only built once when a mesh file is first created.<br>
   Mesh primitives can be transformed dynamically because tracing is done in the local space of each primitive.<br>

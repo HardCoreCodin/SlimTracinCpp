@@ -1,9 +1,8 @@
 #include "../slim/scene/selection.h"
 #include "../slim/draw/bvh.h"
-#include "../slim/draw/ssb.h"
 #include "../slim/draw/hud.h"
 #include "../slim/draw/selection.h"
-#include "../slim/renderer/raytracer.h"
+#include "../slim/renderer/ray_tracer.h"
 #include "../slim/app.h"
 
 // Or using the single-header file:
@@ -15,49 +14,29 @@
 #define OBJECT_COUNT (GRID_SIZE * GRID_SIZE)
 
 
-struct PBRApp : SlimApp {
+struct ExampleApp : SlimApp {
+    bool draw_BVH = false;
+    bool antialias = false;
+    bool cutout = false;
+    bool use_gpu = USE_GPU_BY_DEFAULT;
+
+    // HUD:
+    HUDLine FPS {"FPS : "};
+    HUDLine GPU {"GPU : ", "On", "Off",&use_gpu};
+    HUDLine AA  {"AA  : ", "On", "Off",&antialias};
+    HUDLine BVH {"BVH : ", "On", "Off",&draw_BVH};
+    HUD hud{{4}, &FPS};
+
     // Viewport:
-    Camera camera{
-        .position = {0.0f, 0.0f, -11.0f}
-    };
+    Camera camera{{}, {-1.0f, -1.0f, -20.0f}};
     Canvas canvas;
     Viewport viewport{canvas, &camera};
 
-    // Drawing:
-    f32 opacity = 0.2f;
-
-    bool draw_TLAS = false;
-    bool antialias = false;
-
-    // HUD:
-    HUDLine FPS_hud_line{(char*)"FPS : "};
-    HUDLine GPU_hud_line{(char*)"GPU : ",
-                         (char*)"On",
-                         (char*)"Off",
-                         &ray_tracer.use_gpu,
-                         true};
-    HUDLine AA_hud_line{(char*)"SSAA: ",
-                        (char*)"On",
-                        (char*)"Off",
-                        &antialias,
-                        true};
-    HUDLine Mode_hud_line{(char*)"Mode : ", (char*)"Beauty"};
-    HUDLine TLAS_hud_line{(char*)"TLAS : ", (char*)"BVH"};
-    HUDLine Draw_TLAS_hud_line{(char*)"Draw TLAS : ",
-                               (char*)"On",
-                               (char*)"Off",
-                               &draw_TLAS,
-                               true};
-    HUDSettings hud_settings{6};
-    HUD hud{hud_settings, &FPS_hud_line};
-
-    Selection selection;
-
     // Scene:
-    Light light1{ .position_or_direction = {+10, +10, -10}, .intensity = 300};
-    Light light2{ .position_or_direction = {-10, +10, -10}, .intensity = 300};
-    Light light3{ .position_or_direction = {+10, -20, -10}, .intensity = 300};
-    Light light4{ .position_or_direction = {-10, -20, -10}, .intensity = 300};
+    Light light1{White,{+10, +10, -10}, 300};
+    Light light2{White,{-10, +10, -10}, 300};
+    Light light3{White,{+10, -20, -10}, 300};
+    Light light4{White,{-10, -20, -10}, 300};
     Light *lights{&light1};
 
     Material materials[GRID_SIZE][GRID_SIZE];
@@ -65,9 +44,10 @@ struct PBRApp : SlimApp {
     SceneCounts counts{OBJECT_COUNT, 1, 4, OBJECT_COUNT};
     Scene scene{counts, nullptr, &geometries[0][0],
                 &camera, lights, &materials[0][0]};
-    RayTracer ray_tracer{scene, (u8)counts.geometries, scene.mesh_stack_size};
+    Selection selection;
+    RayTracer ray_tracer{scene};
 
-    PBRApp() {
+    ExampleApp() {
         Color plastic{0.04f};
         for (u8 row = 0; row < GRID_SIZE; row++) {
             for (u8 col = 0; col < GRID_SIZE; col++) {
@@ -86,67 +66,48 @@ struct PBRApp : SlimApp {
             }
         }
     }
-
-    void OnRender() override {
-        static Transform transform;
-        canvas.clear();
-
-        ray_tracer.render(viewport);
-
-        if (draw_TLAS) {
-            if (ray_tracer.use_ssb)
-                drawSSB(scene, canvas);
-            else
-                drawBVH(scene.bvh, transform, viewport);
-        }
-
-        if (controls::is_pressed::alt)
-            drawSelection(selection, viewport, scene);
-
-        if (hud.enabled)
-            drawHUD(hud, canvas);
-
-        canvas.drawToWindow();
-    }
-
     void OnUpdate(f32 delta_time) override {
-        FPS_hud_line.value = (i32)render_timer.average_frames_per_second;
+        i32 fps = (i32)render_timer.average_frames_per_second;
+        FPS.value = fps;
+        FPS.value_color = fps >= 60 ? Green : (fps >= 24 ? Cyan : (fps < 12 ? Red : Yellow));
+
         if (!mouse::is_captured) selection.manipulate(viewport, scene);
         if (!controls::is_pressed::alt) viewport.updateNavigation(delta_time);
     }
 
+    void OnRender() override {
+        ray_tracer.render(viewport, true, use_gpu);
+        if (draw_BVH) drawBVH(scene.bvh, {}, viewport);
+        if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
+        if (hud.enabled) drawHUD(hud, canvas);
+        canvas.drawToWindow();
+    }
+
     void OnKeyChanged(u8 key, bool is_pressed) override {
+        if (!is_pressed) {
+            if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
+            if (key == 'A' && controls::is_pressed::shift) { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
+            if (key == 'G') use_gpu = !use_gpu;
+            if (key == 'B') draw_BVH = !draw_BVH;
+        }
         Move &move = viewport.navigation.move;
+        Turn &turn = viewport.navigation.turn;
+        if (key == 'Q') turn.left     = is_pressed;
+        if (key == 'E') turn.right    = is_pressed;
         if (key == 'R') move.up       = is_pressed;
         if (key == 'F') move.down     = is_pressed;
         if (key == 'W') move.forward  = is_pressed;
         if (key == 'S') move.backward = is_pressed;
         if (key == 'A') move.left     = is_pressed;
         if (key == 'D') move.right    = is_pressed;
-        if (!is_pressed) {
-            if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
-            if (key == 'B') draw_TLAS = !draw_TLAS;
-            if (key == 'G') ray_tracer.use_gpu = !ray_tracer.use_gpu;
-            if (key == 'X') { ray_tracer.use_ssb = !ray_tracer.use_ssb; TLAS_hud_line.value.string = ray_tracer.use_ssb ? (char*)"SSB" : (char*)"BVH";}
-            if (key == 'Z') { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
-            if (key == '1') { ray_tracer.render_mode = RenderMode_Beauty; Mode_hud_line.value.string = (char*)"Beauty"; }
-            if (key == '2') { ray_tracer.render_mode = RenderMode_Depth; Mode_hud_line.value.string = (char*)"Depth"; }
-            if (key == '3') { ray_tracer.render_mode = RenderMode_Normals; Mode_hud_line.value.string = (char*)"Normals"; }
-            if (key == '4') { ray_tracer.render_mode = RenderMode_NormalMap; Mode_hud_line.value.string = (char*)"Normal Maps"; }
-            if (key == '5') { ray_tracer.render_mode = RenderMode_MipLevel; Mode_hud_line.value.string = (char*)"Mip Level"; }
-            if (key == '6') { ray_tracer.render_mode = RenderMode_UVs; Mode_hud_line.value.string = (char*)"UVs"; }
-        }
     }
-
     void OnWindowResize(u16 width, u16 height) override {
         viewport.updateDimensions(width, height);
         canvas.dimensions.update(width, height);
     }
-
     void OnMouseButtonDown(mouse::Button &mouse_button) override {
         mouse::pos_raw_diff_x = mouse::pos_raw_diff_y = 0;
     }
-
     void OnMouseButtonDoubleClicked(mouse::Button &mouse_button) override {
         if (&mouse_button == &mouse::left_button) {
             mouse::is_captured = !mouse::is_captured;
@@ -158,5 +119,5 @@ struct PBRApp : SlimApp {
 };
 
 SlimApp* createApp() {
-    return (SlimApp*)new PBRApp();
+    return (SlimApp*)new ExampleApp();
 }

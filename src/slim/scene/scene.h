@@ -28,14 +28,19 @@ struct SceneCounts {
     u32 curves{0};
 };
 
-struct Scene {
-    SceneCounts counts;
-    String file_path;
-    BVH bvh;
-    BVHBuilder *bvh_builder{nullptr};
-    u32 *bvh_leaf_geometry_indices{nullptr};
+#define SCENE_HAD_EMISSIVE_QUADS 1
 
-    AmbientLight ambient_light;
+struct SceneIO {
+    String file_path;
+    u64 last_io_ticks = 0;
+    bool last_io_is_save{false};
+};
+
+struct Scene {
+    SceneCounts counts{};
+    BVH bvh{};
+    AmbientLight ambient_light{};
+    u32 *bvh_leaf_geometry_indices{nullptr};
 
     Geometry *geometries{nullptr};
     Curve *curves{nullptr};
@@ -49,7 +54,13 @@ struct Scene {
     Material *materials{nullptr};
     Light *lights{nullptr};
     AABB *aabbs{nullptr};
-    RectI *screen_bounds{nullptr};
+//    RectI *screen_bounds{nullptr};
+    BVHBuilder *bvh_builder{nullptr};
+
+    u16 flags{0};
+    u16 mesh_stack_size{0};
+
+    Scene() = default;
 
     void updateAABB(AABB &aabb, const Geometry &geo, u8 sphere_steps = 255) {
         static QuadVertices quad_vertices;
@@ -107,25 +118,13 @@ struct Scene {
         }
     }
 
-    INLINE_XPU void updateAABBs() {
+    void updateAABBs() {
         for (u32 i = 0; i < counts.geometries; i++)
             updateAABB(aabbs[i], geometries[i]);
     }
 
-    u64 last_io_ticks = 0;
-    bool last_io_is_save{false};
-    u8 max_bvh_height = 0;
-    u32 max_triangle_count = 0;
-    u32 max_vertex_positions = 0;
-    u32 max_vertex_normals = 0;
-    u8 mesh_stack_size = 0;
-
-    u32 *mesh_bvh_node_counts = nullptr;
-    u32 *mesh_triangle_counts = nullptr;
-    u32 *mesh_vertex_counts = nullptr;
-
     Scene(SceneCounts counts,
-          char *file_path = nullptr,
+          SceneIO *scene_io = nullptr,
           Geometry *geometries = nullptr,
           Camera *cameras = nullptr,
           Light *lights = nullptr,
@@ -141,7 +140,6 @@ struct Scene {
           Curve *curves = nullptr,
           memory::MonotonicAllocator *memory_allocator = nullptr
     ) : counts{counts},
-        file_path{file_path},
         cameras{cameras},
         geometries{geometries},
         grids{grids},
@@ -154,8 +152,6 @@ struct Scene {
         materials{materials},
         lights{lights}
     {
-        mesh_stack_size = 0;
-        max_triangle_count = 0;
         bvh.node_count = counts.geometries * 2;
         bvh.height = (u8)counts.geometries;
 
@@ -174,12 +170,13 @@ struct Scene {
             if (!textures) capacity += sizeof(Texture) * counts.textures;
             capacity += getTotalMemoryForTextures(texture_files, counts.textures);
         }
+        u32 max_triangle_count = 0;
         if (counts.meshes) {
             if (!meshes) capacity += sizeof(Mesh) * counts.meshes;
-            capacity += getTotalMemoryForMeshes(mesh_files, counts.meshes ,&max_bvh_height, &max_triangle_count);
-            capacity += sizeof(u32) * (3 * counts.meshes);
+            capacity += getTotalMemoryForMeshes(mesh_files, counts.meshes, &max_triangle_count);
+            capacity += sizeof(u32) * (2 * counts.meshes);
         }
-        u32 max_leaf_node_count = max_triangle_count > counts.geometries ? max_triangle_count : counts.geometries;
+        u32 max_leaf_node_count = Max(max_triangle_count, counts.geometries);
         capacity += BVHBuilder::getSizeInBytes(max_leaf_node_count);
 
         if (!memory_allocator) {
@@ -193,7 +190,7 @@ struct Scene {
         *bvh_builder = BVHBuilder{max_leaf_node_count, memory_allocator};
 
         aabbs = (AABB*)memory_allocator->allocate(sizeof(AABB) * counts.geometries);
-        screen_bounds = (RectI*)memory_allocator->allocate(sizeof(RectI) * counts.geometries);
+//        screen_bounds = (RectI*)memory_allocator->allocate(sizeof(RectI) * counts.geometries);
 
         if (counts.geometries && !geometries) {
             geometries = (Geometry*)memory_allocator->allocate(sizeof(Geometry) * counts.geometries);
@@ -232,22 +229,18 @@ struct Scene {
             if (!meshes) meshes = (Mesh*)memory_allocator->allocate(sizeof(Mesh) * counts.meshes);
             for (u32 i = 0; i < counts.meshes; i++) meshes[i] = Mesh{};
 
-            mesh_bvh_node_counts = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
-            mesh_triangle_counts = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
-            mesh_vertex_counts   = (u32*)memory_allocator->allocate(sizeof(u32) * counts.meshes);
-
-            max_vertex_positions = 0;
-            max_vertex_normals = 0;
             for (u32 i = 0; i < counts.meshes; i++) {
                 load(meshes[i], mesh_files[i].char_ptr, memory_allocator);
-                mesh_bvh_node_counts[i] = meshes[i].bvh.node_count;
-                mesh_triangle_counts[i] = meshes[i].triangle_count;
-                if (meshes[i].vertex_count  > max_vertex_positions) max_vertex_positions = meshes[i].vertex_count;
-                if (meshes[i].normals_count > max_vertex_normals)   max_vertex_normals   = meshes[i].normals_count;
-                if (meshes[i].bvh.height > mesh_stack_size)         mesh_stack_size      = meshes[i].bvh.height;
+                mesh_stack_size = Max(mesh_stack_size, meshes[i].bvh.height);
             }
             mesh_stack_size += 2;
         }
+
+        flags = 0;
+        for (u32 i = 0; i < counts.geometries; i++)
+            if (geometries[i].type == GeometryType_Quad && materials[geometries[i].material_id].isEmissive()) {
+                flags = SCENE_HAD_EMISSIVE_QUADS;
+            }
 
         updateAABBs();
         updateBVH();

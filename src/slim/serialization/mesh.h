@@ -149,20 +149,15 @@ bool load(Mesh &mesh, char *file_path, memory::MonotonicAllocator *memory_alloca
     return true;
 }
 
-u32 getTotalMemoryForMeshes(String *mesh_files, u32 mesh_count, u8 *max_bvh_height = nullptr, u32 *max_triangle_count = nullptr) {
+u32 getTotalMemoryForMeshes(String *mesh_files, u32 mesh_count, u32 *max_triangle_count = nullptr) {
     u32 memory_size = 0;
-    if (max_bvh_height) *max_bvh_height = 0;
     if (max_triangle_count) *max_triangle_count = 0;
     for (u32 i = 0; i < mesh_count; i++) {
         Mesh mesh;
         loadHeader(mesh, mesh_files[i].char_ptr);
+        if (max_triangle_count) *max_triangle_count = Max(*max_triangle_count, mesh.triangle_count);
         memory_size += getSizeInBytes(mesh);
-
-        if (max_bvh_height && mesh.bvh.height > *max_bvh_height) *max_bvh_height = mesh.bvh.height;
-        if (max_triangle_count && mesh.triangle_count > *max_triangle_count) *max_triangle_count = mesh.triangle_count;
     }
-    if (max_bvh_height)
-        memory_size += sizeof(u32) * (*max_bvh_height + (1 << *max_bvh_height));
 
     return memory_size;
 }

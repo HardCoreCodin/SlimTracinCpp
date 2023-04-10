@@ -511,11 +511,11 @@ struct AABB {
     }
 };
 
-INLINE Color vec3ToColor(const vec3 &v) {
+INLINE_XPU Color vec3ToColor(const vec3 &v) {
     return {v.r, v.g, v.b};
 }
 
-INLINE Color directionToColor(const vec3 &v) {
+INLINE_XPU Color directionToColor(const vec3 &v) {
     return {
         fast_mul_add(v.r, 0.5f, 0.5f),
         fast_mul_add(v.g, 0.5f, 0.5f),
@@ -523,6 +523,6 @@ INLINE Color directionToColor(const vec3 &v) {
     };
 }
 
-INLINE vec3 colorToVec3(const Color &color) {
+INLINE_XPU vec3 colorToVec3(const Color &color) {
     return {color.r, color.g, color.b};
 }

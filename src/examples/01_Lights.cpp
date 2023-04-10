@@ -1,162 +1,111 @@
 #include "../slim/scene/selection.h"
 #include "../slim/draw/hud.h"
 #include "../slim/draw/selection.h"
-#include "../slim/renderer/raytracer.h"
+#include "../slim/renderer/ray_tracer.h"
 #include "../slim/app.h"
 
-// Or using the single-header file:
-//#include "../slim.H"
 
-struct LightsApp : SlimApp {
+// Or using the single-header file:
+//#include "../slim.h"
+
+struct ExampleApp : SlimApp {
+    bool antialias = false;
+    bool use_gpu = USE_GPU_BY_DEFAULT;
+
+    // HUD:
+    HUDLine FPS {"FPS : "};
+    HUDLine GPU {"GPU : ", "On", "Off",&use_gpu};
+    HUDLine AA  {"AA  : ", "On", "Off",&antialias};
+    HUDLine Mode{"Mode: ", "Beauty"};
+    HUD hud{{4}, &FPS};
+
     // Viewport:
-    Camera camera{
-        .orientation = {-25 * DEG_TO_RAD, 0, 0},
-        .position = {-4, 15, -17}
-    }, *cameras{&camera};
+    Camera camera{{-25 * DEG_TO_RAD, 0, 0}, {0, 25, -45}}, *cameras{&camera};
     Canvas canvas;
     Viewport viewport{canvas, &camera};
 
     // Scene:
-    Light key_light{
-        .color = {1.0f, 1.0f, 0.65f},
-        .position_or_direction = {20, 20, -5},
-        .intensity = 1.1f * 150.0f
-    };
-    Light fill_light{
-        .color = {0.65f, 0.65f, 1.0f},
-        .position_or_direction = {-20, 20, -5},
-        .intensity = 1.2f * 150.0f
-    };
-    Light rim_light{
-        .color = {1.0f, 0.25f, 0.25f},
-        .position_or_direction = {2, 5, 10},
-        .intensity = 0.9f * 150.0f
-    };
+    Light key_light{ {1.0f, 1.0f, 0.65f}, {20, 17, -5}, 1.1f * 150.0f};
+    Light fill_light{{0.65f, 0.65f, 1.0f}, {-20, 15, -5}, 1.2f * 150.0f };
+    Light rim_light{ {1.0f, 0.25f, 0.25f}, {2, 5, 10}, 0.9f * 150.0f};
     Light *lights{&key_light};
 
-    Material floor_material{
-        .roughness = 0.2f,
-        .flags = MATERIAL_HAS_NORMAL_MAP |
-                 MATERIAL_HAS_ALBEDO_MAP,
-        .texture_count = 2,
-        .texture_ids = {0, 1}
-    };
+    u8 flags{MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
+    Material floor_material{0.8f, 0.2f, flags, 2, {0, 1}};
     Material *materials{&floor_material};
 
-    char string_buffers[2][200];
+    Geometry floor {{{}, {}, {40, 1, 40}},GeometryType_Quad};
+    Geometry *geometries{&floor};
+
+    Texture textures[2];
+    char string_buffers[2][200]{};
     String texture_files[2]{
-        String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
-        String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
+        String::getFilePath("floor_albedo.texture",string_buffers[0],__FILE__),
+        String::getFilePath("floor_normal.texture",string_buffers[1],__FILE__),
     };
 
-    Texture floor_albedo_map;
-    Texture floor_normal_map;
-    Texture *textures = &floor_albedo_map;
-
-    Geometry plane{
-        .transform = {
-            .scale = {40, 1, 40}
-        },
-        .type = GeometryType_Quad
-    };
-    Geometry *geometries{&plane};
-
-    SceneCounts counts{
-        .geometries = 1,
-        .cameras = 1,
-        .lights = 3,
-        .materials = 1,
-        .textures = 2
-    };
-    Scene scene{counts, nullptr, geometries, cameras, lights, materials, textures, texture_files};
+    Scene scene{{1,1,3,1,2}, nullptr,
+                geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 
-    RayTracer ray_tracer{scene, (u8)counts.geometries, scene.mesh_stack_size};
-
-    // Drawing:
-    f32 opacity = 0.2f;
-
-    bool draw_bvh = false;
-    bool draw_ssb = false;
-    bool antialias = false;
-
-    // HUD:
-    HUDLine FPS_hud_line{(char*)"FPS : "};
-    HUDLine GPU_hud_line{(char*)"GPU : ",
-                         (char*)"On",
-                         (char*)"Off",
-                         &ray_tracer.use_gpu,
-                         true};
-    HUDLine AA_hud_line{(char*)"SSAA: ",
-                        (char*)"On",
-                        (char*)"Off",
-                        &antialias,
-                        true};
-    HUDLine Mode_hud_line{(char*)"Mode : ", (char*)"Beauty"};
-    HUDLine BVH_hud_line{(char*)"BVH : ",
-                         (char*)"On",
-                         (char*)"Off",
-                         &draw_bvh,
-                         true};
-    HUDLine SSB_hud_line{(char*)"SSB : ",
-                         (char*)"On",
-                         (char*)"Off",
-                         &draw_ssb,
-                         true};
-    HUDSettings hud_settings{6};
-    HUD hud{hud_settings, &FPS_hud_line};
+    RayTracer ray_tracer{scene};
 
     void OnUpdate(f32 delta_time) override {
-        FPS_hud_line.value = (i32)render_timer.average_frames_per_second;
+        i32 fps = (i32)render_timer.average_frames_per_second;
+        FPS.value = fps;
+        FPS.value_color = fps >= 60 ? Green : (fps >= 24 ? Cyan : (fps < 12 ? Red : Yellow));
+
         if (!mouse::is_captured) selection.manipulate(viewport, scene);
         if (!controls::is_pressed::alt) viewport.updateNavigation(delta_time);
     }
 
     void OnRender() override {
-        canvas.clear();
-
-        ray_tracer.render(viewport);
+        ray_tracer.render(viewport, true, use_gpu);
         if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
         if (hud.enabled) drawHUD(hud, canvas);
-
         canvas.drawToWindow();
     }
 
     void OnKeyChanged(u8 key, bool is_pressed) override {
+        if (!is_pressed) {
+            if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
+            if (key == 'A' && controls::is_pressed::shift) { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
+            if (key == 'G') use_gpu = !use_gpu;
+            if (key == '1') ray_tracer.settings.render_mode = RenderMode_Beauty;
+            if (key == '2') ray_tracer.settings.render_mode = RenderMode_Depth;
+            if (key == '3') ray_tracer.settings.render_mode = RenderMode_Normals;
+            if (key == '4') ray_tracer.settings.render_mode = RenderMode_NormalMap;
+            if (key == '5') ray_tracer.settings.render_mode = RenderMode_MipLevel;
+            if (key == '6') ray_tracer.settings.render_mode = RenderMode_UVs;
+            const char* mode;
+            switch ( ray_tracer.settings.render_mode) {
+                case RenderMode_Beauty:    mode = "Beauty"; break;
+                case RenderMode_Depth:     mode = "Depth"; break;
+                case RenderMode_Normals:   mode = "Normals"; break;
+                case RenderMode_NormalMap: mode = "Normal Maps"; break;
+                case RenderMode_MipLevel:  mode = "Mip Level"; break;
+                case RenderMode_UVs:       mode = "UVs"; break;
+            }
+            Mode.value.string = mode;
+        }
         Move &move = viewport.navigation.move;
         Turn &turn = viewport.navigation.turn;
-        if (key == 'X') turn.left     = is_pressed;
-        if (key == 'C') turn.right    = is_pressed;
+        if (key == 'Q') turn.left     = is_pressed;
+        if (key == 'E') turn.right    = is_pressed;
         if (key == 'R') move.up       = is_pressed;
         if (key == 'F') move.down     = is_pressed;
         if (key == 'W') move.forward  = is_pressed;
         if (key == 'S') move.backward = is_pressed;
         if (key == 'A') move.left     = is_pressed;
         if (key == 'D') move.right    = is_pressed;
-        if (!is_pressed) {
-            if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
-            if (key == 'H') draw_bvh = !draw_bvh;
-            if (key == 'B') draw_ssb = !draw_ssb;
-            if (key == 'G') ray_tracer.use_gpu = !ray_tracer.use_gpu;
-            if (key == 'Z') { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
-            if (key == '1') { ray_tracer.render_mode = RenderMode_Beauty; Mode_hud_line.value.string = (char*)"Beauty"; }
-            if (key == '2') { ray_tracer.render_mode = RenderMode_Depth; Mode_hud_line.value.string = (char*)"Depth"; }
-            if (key == '3') { ray_tracer.render_mode = RenderMode_Normals; Mode_hud_line.value.string = (char*)"Normals"; }
-            if (key == '4') { ray_tracer.render_mode = RenderMode_NormalMap; Mode_hud_line.value.string = (char*)"Normal Maps"; }
-            if (key == '5') { ray_tracer.render_mode = RenderMode_MipLevel; Mode_hud_line.value.string = (char*)"Mip Level"; }
-            if (key == '6') { ray_tracer.render_mode = RenderMode_UVs; Mode_hud_line.value.string = (char*)"UVs"; }
-        }
     }
-
     void OnWindowResize(u16 width, u16 height) override {
         viewport.updateDimensions(width, height);
         canvas.dimensions.update(width, height);
     }
-
     void OnMouseButtonDown(mouse::Button &mouse_button) override {
         mouse::pos_raw_diff_x = mouse::pos_raw_diff_y = 0;
     }
-
     void OnMouseButtonDoubleClicked(mouse::Button &mouse_button) override {
         if (&mouse_button == &mouse::left_button) {
             mouse::is_captured = !mouse::is_captured;
@@ -168,5 +117,5 @@ struct LightsApp : SlimApp {
 };
 
 SlimApp* createApp() {
-    return (SlimApp*)new LightsApp();
+    return (SlimApp*)new ExampleApp();
 }

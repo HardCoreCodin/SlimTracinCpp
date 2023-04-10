@@ -1,16 +1,16 @@
 #pragma once
 
-#include "../../core/ray.h"
-#include "../../scene/mesh.h"
+#include "../core/ray.h"
+#include "../scene/mesh.h"
 
 struct MeshTracer {
     u32 *stack = nullptr;
-    u32 stack_size = 0;
 
     mutable RayHit triangle_hit;
 
-    INLINE_XPU MeshTracer(u32 *stack, u32 stack_size) : stack{stack}, stack_size{stack_size} {}
-    explicit MeshTracer(u32 stack_size, memory::MonotonicAllocator *memory_allocator = nullptr) : stack_size{stack_size} {
+    INLINE_XPU explicit MeshTracer(u32 *stack) : stack{stack} {}
+
+    explicit MeshTracer(u32 stack_size, memory::MonotonicAllocator *memory_allocator = nullptr) {
         memory::MonotonicAllocator temp_allocator;
         if (!memory_allocator) {
             temp_allocator = memory::MonotonicAllocator{sizeof(u32) * stack_size};
@@ -104,8 +104,6 @@ struct MeshTracer {
                         right_node = tmp_node;
                     }
                     stack[top++] = right_node->first_index;
-                    if (top == stack_size)
-                        return false;
                 }
                 left_node = mesh.bvh.nodes + left_node->first_index;
             } else if (right_node) {

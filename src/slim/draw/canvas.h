@@ -34,7 +34,8 @@ struct Canvas {
         }
     }
 
-    Canvas(Pixel *pixels, f32 *depths) noexcept : pixels{pixels}, depths{depths} {}
+    INLINE_XPU Canvas(Pixel *pixels, f32 *depths, Dimensions dimensions = {}) noexcept :
+        pixels{pixels}, depths{depths}, dimensions{dimensions} {}
 
     void clear(f32 red = 0, f32 green = 0, f32 blue = 0, f32 opacity = 1.0f, f32 depth = INFINITY) const {
         i32 pixels_width  = dimensions.width;
@@ -145,6 +146,11 @@ struct Canvas {
         if (x < 0 || y < 0 || x >= w || y >= h)
             return;
 
+        bool override = false;
+        if (opacity < 0) {
+            override = true;
+            opacity = -opacity;
+        }
         opacity = clampedValue(opacity);
         Pixel pixel{color.clamped(), opacity};
         pixel.color *= pixel.color * pixel.opacity;
@@ -153,6 +159,7 @@ struct Canvas {
         Pixel *out_pixel = pixels + offset;
         f32 *out_depth = depths ? (depths + (antialias == MSAA ? offset * 4 : offset)) : nullptr;
         if (
+                override ||
                 (
                         (out_depth == nullptr ||
                          *out_depth == INFINITY) &&
@@ -263,7 +270,7 @@ struct Canvas {
 #endif
 
 private:
-    static INLINE bool _isTransparentPixelQuad(Pixel *pixel_quad) {
+    static INLINE_XPU bool _isTransparentPixelQuad(Pixel *pixel_quad) {
         return (
                 (pixel_quad[0].opacity == 0.0f) &&
                 (pixel_quad[1].opacity == 0.0f) &&
@@ -272,11 +279,11 @@ private:
         );
     }
 
-    INLINE Pixel _blendPixelQuad(Pixel *pixel_quad) const {
+    INLINE_XPU Pixel _blendPixelQuad(Pixel *pixel_quad) const {
         return (pixel_quad[0] + pixel_quad[1] + pixel_quad[2] + pixel_quad[3]) * 0.25f;
     }
 
-    static INLINE void _sortPixelsByDepth(f32 depth, Pixel *pixel, f32 *out_depth, Pixel *out_pixel, Pixel **background, Pixel **foreground) {
+    static INLINE_XPU void _sortPixelsByDepth(f32 depth, Pixel *pixel, f32 *out_depth, Pixel *out_pixel, Pixel **background, Pixel **foreground) {
         if (depth == 0.0f || depth < *out_depth) {
             *out_depth = depth;
             *background = out_pixel;

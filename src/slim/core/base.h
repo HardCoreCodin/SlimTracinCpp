@@ -19,7 +19,7 @@
         #include <stdlib.H>
         inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true) {
             if (code != cudaSuccess) {
-                fprintf(stderr,"GPUassert: %s %s %d\N", cudaGetErrorString(code) , file, line);
+                fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code) , file, line);
                 if (abort) exit(code);
             }
         }
@@ -47,10 +47,12 @@
     #endif
 
     #define checkErrors() gpuErrchk(cudaPeekAtLastError())
+    #define uploadConstant(cpu_ptr, constant)      gpuErrchk(cudaMemcpyToSymbol(constant, cpu_ptr, sizeof((cpu_ptr)[0])))
     #define uploadNto(cpu_ptr, gpu_ptr, N, offset) gpuErrchk(cudaMemcpy(&((gpu_ptr)[(offset)]), (cpu_ptr), sizeof((cpu_ptr)[0]) * (N), cudaMemcpyHostToDevice))
     #define uploadN(  cpu_ptr, gpu_ptr, N        ) gpuErrchk(cudaMemcpy(&((gpu_ptr)[0])       , (cpu_ptr), sizeof((cpu_ptr)[0]) * (N), cudaMemcpyHostToDevice))
     #define downloadN(gpu_ptr, cpu_ptr, N)         gpuErrchk(cudaMemcpy((cpu_ptr), &((gpu_ptr)[0])       , sizeof((cpu_ptr)[0]) * (N), cudaMemcpyDeviceToHost))
     #define downloadNto(gpu_ptr,cpu_ptr,N, offset) gpuErrchk(cudaMemcpy((cpu_ptr), &((gpu_ptr)[(offset)]), sizeof((cpu_ptr)[0]) * (N), cudaMemcpyDeviceToHost))
+    #define setDataOnGPU(gpu_ptr, data, N)         gpuErrchk(cudaMemset((gpu_ptr), (data),                 sizeof((gpu_ptr)[0]) * (N)))
 #else
     #ifndef XPU
         #define XPU

@@ -10,7 +10,8 @@
 struct RayHit {
     vec3 position, normal;
     UV uv;
-    f32 distance, uv_coverage, cone_width, cone_width_scaling_factor = 1.0f;
+    f32 distance, uv_coverage, cone_width;
+    f32 scaling_factor;
     u32 id;
     bool from_behind = false;
 };
@@ -173,7 +174,7 @@ struct Ray {
         return side;
     }
 
-    INLINE bool hitsDefaultSphere(RayHit &hit, bool is_transparent = false) const {
+    INLINE_XPU bool hitsDefaultSphere(RayHit &hit, bool is_transparent = false) const {
         f32 t_to_closest = -(origin.dot(direction));
         if (t_to_closest <= 0) // Ray is aiming away from the sphere
             return false;

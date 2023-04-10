@@ -1,157 +1,132 @@
 #include "../slim/scene/selection.h"
 #include "../slim/draw/hud.h"
+#include "../slim/draw/bvh.h"
 #include "../slim/draw/selection.h"
-#include "../slim/renderer/raytracer.h"
+#include "../slim/renderer/ray_tracer.h"
 #include "../slim/app.h"
 
 
 // Or using the single-header file:
 //#include "../slim.h"
 
-struct GeometryApp : SlimApp {
+struct ExampleApp : SlimApp {
+    bool draw_BVH = false;
+    bool antialias = false;
+    bool cutout = false;
+    bool use_gpu = USE_GPU_BY_DEFAULT;
+
+    // HUD:
+    HUDLine FPS {"FPS : "};
+    HUDLine GPU {"GPU : ", "On", "Off",&use_gpu};
+    HUDLine AA  {"AA  : ", "On", "Off",&antialias};
+    HUDLine BVH {"BVH : ", "On", "Off",&draw_BVH};
+    HUDLine Cut {"Cut : ", "On", "Off",&cutout};
+    HUDLine Mode{"Mode: ", "Beauty"};
+    HUD hud{{6}, &FPS};
+
     // Viewport:
-    Camera camera{
-        .orientation = {-25 * DEG_TO_RAD, 0, 0},
-        .position = {-4, 15, -17}
-    }, *cameras{&camera};
+    Camera camera{{-25 * DEG_TO_RAD, 0, 0}, {-4, 15, -17}}, *cameras{&camera};
     Canvas canvas;
-    Viewport viewport{canvas,&camera};
+    Viewport viewport{canvas, &camera};
 
     // Scene:
-    Light key_light{
-        .color = {1.0f, 1.0f, 0.65f},
-        .position_or_direction = {20, 20, -5},
-        .intensity = 1.1f * 150.0f
-    };
-    Light fill_light{
-        .color = {0.65f, 0.65f, 1.0f},
-        .position_or_direction = {-20, 20, -5},
-        .intensity = 1.2f * 150.0f
-    };
-    Light rim_light{
-        .color = {1.0f, 0.25f, 0.25f},
-        .position_or_direction = {2, 5, 10},
-        .intensity = 0.9f * 150.0f
-    };
+    Light key_light{ {1.0f, 1.0f, 0.65f}, {20, 20, -5}, 1.1f * 150.0f};
+    Light fill_light{{0.65f, 0.65f, 1.0f}, {-20, 20, -5}, 1.2f * 150.0f };
+    Light rim_light{ {1.0f, 0.25f, 0.25f}, {5, 8, 15}, 0.9f * 150.0f};
     Light *lights{&key_light};
 
-    Material shapes_material{
-        .albedo = {0.8f, 1.0f, 0.8f},
-        .brdf = BRDF_Lambert
-    };
-    Material floor_material{
-        .roughness = 0.2f,
-        .flags = MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP,
-        .texture_count = 2,
-        .texture_ids = {0, 1}
-    };
-    Material *materials{&shapes_material};
+    u8 flags{MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
+    Material shape_material{0.8f, 0.7f};
+    Material floor_material{0.8f, 0.2f, flags, 2, {0, 1}};
+    Material *materials{&shape_material};
 
-    char string_buffers[2][200];
+    Geometry floor {{{},{       },{40, 1, 40}},GeometryType_Quad,1};
+    Geometry box{   {{},{-9, 8, -2},{2, 2, 3}},GeometryType_Box};
+    Geometry tet{   {{},{-3, 6, 14},{4, 3, 4}},GeometryType_Tet};
+    Geometry sphere{{{},{3, 6, 2  },{4, 3, 3}},GeometryType_Sphere};
+    Geometry *geometries{&floor};
+
+    Texture textures[2];
+    char string_buffers[2][200]{};
     String texture_files[2]{
-        String::getFilePath((char*)"floor_albedo.texture",string_buffers[0],(char*)__FILE__),
-        String::getFilePath((char*)"floor_normal.texture",string_buffers[1],(char*)__FILE__)
+        String::getFilePath("floor_albedo.texture",string_buffers[0],__FILE__),
+        String::getFilePath("floor_normal.texture",string_buffers[1],__FILE__),
     };
 
-    Texture floor_albedo_map;
-    Texture floor_normal_map;
-    Texture *textures = &floor_albedo_map;
-
-    Geometry box{
-        .transform = {
-            .orientation = {0.02f, 0.04f, 0.0f},
-            .position = {-11, 8, 5},
-            .scale = {3, 4, 5}
-        },
-        .type = GeometryType_Box
-    };
-    Geometry tet{
-        .transform = {
-            .orientation = {0.02f, 0.04f, 0.06f},
-            .position = {-3, 6, 14},
-            .scale = {4, 3, 5}
-        },
-        .type = GeometryType_Tet
-    };
-    Geometry sphere{
-        .transform = {
-            .position = {3, 6, 2},
-            .scale = {5, 4, 3}
-        },
-        .type = GeometryType_Sphere
-    };
-    Geometry floor{
-        .transform = {
-            .scale = {40, 1, 40}
-        },
-        .type = GeometryType_Quad,
-        .material_id = 1
-    };
-    Geometry *geometries{&box};
-
-    SceneCounts counts{
-        .geometries = 4,
-        .cameras = 1,
-        .lights = 3,
-        .materials = 2,
-        .textures = 2
-    };
-    Scene scene{counts, nullptr, geometries, cameras, lights, materials, textures, texture_files};
+    Scene scene{{4,1,3,1,2}, nullptr,
+                geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 
-    RayTracer ray_tracer{scene, (u8)counts.geometries, scene.mesh_stack_size};
-
-    // Drawing:
-    f32 opacity = 0.2f;
-    quat rotation{tet.transform.orientation};
+    RayTracer ray_tracer{scene};
 
     void OnUpdate(f32 delta_time) override {
+        i32 fps = (i32)render_timer.average_frames_per_second;
+        FPS.value = fps;
+        FPS.value_color = fps >= 60 ? Green : (fps >= 24 ? Cyan : (fps < 12 ? Red : Yellow));
+
         if (!mouse::is_captured) selection.manipulate(viewport, scene);
+        if (selection.changed) updateSelectionInHUD();
         if (!controls::is_pressed::alt) viewport.updateNavigation(delta_time);
 
-        quat rot = quat::AxisAngle(rotation.axis, delta_time * 10.0f);
-        for (u8 i = 0; i < scene.counts.geometries; i++) {
+        static vec3 axis{OrientationUsingQuaternion{0.02f, 0.04f, 0.06f}.axis};
+        quat rot = quat::AxisAngle(axis, delta_time * 10.0f);
+        for (u32 i = 0; i < scene.counts.geometries; i++) {
             Geometry &geo = geometries[i];
             if (!(controls::is_pressed::alt && &geo == selection.geometry) &&
-                geo.type != GeometryType_Quad)
+                geo.type != GeometryType_Quad && geo.type != GeometryType_Mesh)
                 geo.transform.orientation = (geo.transform.orientation * rot).normalized();
         }
     }
 
-    void OnRender() override {
-        canvas.clear();
-
-        ray_tracer.render(viewport);
-        if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
-        if (hud.enabled) drawHUD(hud, canvas);
-
-        canvas.drawToWindow();
+    void updateSelectionInHUD() {
+        cutout = selection.geometry && (selection.geometry->flags & GEOMETRY_IS_TRANSPARENT);
+        selection.changed = false;
     }
 
-    // HUD:
-    HUDLine Transparent_hud_line{(char*)"Transparent : ",
-                                 (char*)"On",
-                                 (char*)"Off",
-                                 &transparent,
-                                 true};
-    HUD hud{{1}, &Transparent_hud_line};
-
-    bool transparent = false;
+    void OnRender() override {
+        ray_tracer.render(viewport, true, use_gpu);
+        if (draw_BVH) {
+            for (u32 i = 0; i < scene.counts.geometries; i++)
+                if (geometries[i].type == GeometryType_Mesh)
+                    drawBVH(scene.meshes[geometries[i].id].bvh, geometries[i].transform, viewport);
+            drawBVH(scene.bvh, {}, viewport);
+        }
+        if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
+        if (hud.enabled) drawHUD(hud, canvas);
+        canvas.drawToWindow();
+    }
 
     void OnKeyChanged(u8 key, bool is_pressed) override {
         if (!is_pressed) {
             if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
-            if (key == 'T' && selection.geometry) {
-                u8 &flags = selection.geometry->flags;
-                if (flags & GEOMETRY_IS_TRANSPARENT)
-                    flags &= ~GEOMETRY_IS_TRANSPARENT;
+            if (key == 'A' && controls::is_pressed::shift) { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
+            if (key == 'G') use_gpu = !use_gpu;
+            if (key == 'B') draw_BVH = !draw_BVH;
+            if (key == '1') ray_tracer.settings.render_mode = RenderMode_Beauty;
+            if (key == '2') ray_tracer.settings.render_mode = RenderMode_Depth;
+            if (key == '3') ray_tracer.settings.render_mode = RenderMode_Normals;
+            if (key == '4') ray_tracer.settings.render_mode = RenderMode_NormalMap;
+            if (key == '5') ray_tracer.settings.render_mode = RenderMode_MipLevel;
+            if (key == '6') ray_tracer.settings.render_mode = RenderMode_UVs;
+            const char* mode;
+            switch ( ray_tracer.settings.render_mode) {
+                case RenderMode_Beauty:    mode = "Beauty"; break;
+                case RenderMode_Depth:     mode = "Depth"; break;
+                case RenderMode_Normals:   mode = "Normals"; break;
+                case RenderMode_NormalMap: mode = "Normal Maps"; break;
+                case RenderMode_MipLevel:  mode = "Mip Level"; break;
+                case RenderMode_UVs:       mode = "UVs"; break;
+            }
+            Mode.value.string = mode;
+            if (key == 'C' && selection.geometry) {
+                if (selection.geometry->flags & GEOMETRY_IS_TRANSPARENT)
+                    selection.geometry->flags &= ~GEOMETRY_IS_TRANSPARENT;
                 else
-                    flags |= GEOMETRY_IS_TRANSPARENT;
+                    selection.geometry->flags |= GEOMETRY_IS_TRANSPARENT;
 
-                transparent = flags & GEOMETRY_IS_TRANSPARENT;
+                cutout = selection.geometry->flags & GEOMETRY_IS_TRANSPARENT;
             }
         }
-
         Move &move = viewport.navigation.move;
         Turn &turn = viewport.navigation.turn;
         if (key == 'Q') turn.left     = is_pressed;
@@ -181,5 +156,5 @@ struct GeometryApp : SlimApp {
 };
 
 SlimApp* createApp() {
-    return (SlimApp*)new GeometryApp();
+    return (SlimApp*)new ExampleApp();
 }

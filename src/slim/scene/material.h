@@ -91,17 +91,21 @@ INLINE_XPU Color getColorByUV(vec2 uv) { return {uv.u, uv.v, 1.0f}; }
 
 struct Material {
     Color albedo = 1.0f;
-    Color reflectivity{F0_Default};
-    Color emission = 0.0f;
-    UV uv_repeat = 1.0f;
     f32 roughness = 1.0f;
-    f32 metalness = 0.0f;
-    f32 normal_magnitude = 1.0f;
-    f32 IOR = 1.0f;
-    BRDFType brdf{BRDF_CookTorrance};
+
     u8 flags = 0;
     u8 texture_count = 0;
-    u8 texture_ids[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    u8 texture_ids[2] = {0, 0};
+    BRDFType brdf{BRDF_CookTorrance};
+
+    f32 normal_magnitude = 1.0f;
+    UV uv_repeat = 1.0f;
+
+    Color emission = 0.0f;
+    f32 IOR = 1.0f;
+
+    Color reflectivity{F0_Default};
+    f32 metalness = 0.0f;
 
     INLINE_XPU bool isEmissive() const { return flags & MATERIAL_IS_EMISSIVE; }
     INLINE_XPU bool isReflective() const { return flags & MATERIAL_IS_REFLECTIVE; }

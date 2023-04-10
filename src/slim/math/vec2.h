@@ -765,8 +765,8 @@ INLINE_XPU vec2 lerp(const vec2 &from, const vec2 &to, f32 by) {
 }
 
 struct UV : vec2 {
-    INLINE UV() : vec2{1.0f} {}
-    INLINE UV(f32 value) : vec2{value} {}
+    INLINE_XPU UV() : vec2{1.0f} {}
+    INLINE_XPU UV(f32 value) : vec2{value} {}
 
     INLINE_XPU bool onCheckerboard(u8 steps = 4) const {
         return isOnCheckerboard(u, v, steps);

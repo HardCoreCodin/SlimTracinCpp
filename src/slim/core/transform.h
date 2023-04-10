@@ -59,7 +59,7 @@ private:
 struct Geometry {
     Transform transform{};
     GeometryType type{GeometryType_None};
-    ColorID color{White};
     u32 material_id = 0, id = 0;
     u8 flags = GEOMETRY_IS_VISIBLE | GEOMETRY_IS_SHADOWING;
+    ColorID color{White};
 };
