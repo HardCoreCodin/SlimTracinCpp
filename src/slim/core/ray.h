@@ -10,7 +10,7 @@
 struct RayHit {
     vec3 position, normal;
     UV uv;
-    f32 distance, uv_coverage, cone_width;
+    f32 distance, uv_coverage, cone_width, NdotRd;
     f32 scaling_factor;
     u32 id;
     bool from_behind = false;

@@ -36,7 +36,7 @@ struct ExampleApp : SlimApp {
     Light *lights{&key_light};
 
     u8 flags{MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
-    Material shape_material{0.8f, 0.7f};
+    Material shape_material{0.8f, 0.7f, flags, 2, {0, 1}};
     Material floor_material{0.8f, 0.2f, flags, 2, {0, 1}};
     Material *materials{&shape_material};
 
@@ -53,7 +53,7 @@ struct ExampleApp : SlimApp {
         String::getFilePath("floor_normal.texture",string_buffers[1],__FILE__),
     };
 
-    Scene scene{{4,1,3,1,2}, nullptr,
+    Scene scene{{4,1,3,2,2},
                 geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 

@@ -100,11 +100,8 @@ struct LightsShader {
             if (hit(Ro, Rd, light.position_or_direction, inverse_scale)) {
                 hit_light = true;
                 density = getVolumeDensity();
-                t_far  = t_far - scale * 8;
-                if (t_far < closest_hit_distance)
-                    closest_hit_distance = t_far;
-
-                color = light.color.scaleAdd(  powf(density, 64) * 64, color);
+                closest_hit_distance = Min(closest_hit_distance, t_far);
+                color = light.color.scaleAdd(  pow(density, 8.0f) * 4, color);
             }
         }
 

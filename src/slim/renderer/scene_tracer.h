@@ -9,7 +9,6 @@ struct SceneTracer {
 
     Ray shadow_ray, aux_ray;
     RayHit shadow_hit, aux_hit;
-    vec3 _closest_hit_ray_direction;
 
     INLINE_XPU SceneTracer(u32 *stack, u32 *mesh_stack) : mesh_tracer{mesh_stack}, stack{stack} {}
 
@@ -59,8 +58,16 @@ struct SceneTracer {
         // Compute uvs and uv-coverage using Ray Cones:
         // Note: This is done while the hit is still in LOCAL space and using its LOCAL and PRE-NORMALIZED ray direction
         hit.cone_width = hit.distance * hit.scaling_factor;
-        hit.uv_coverage *= hit.cone_width * hit.cone_width / _closest_hit_ray_direction.squaredLength();;
-        hit.uv_coverage /= -(hit.normal.dot(_closest_hit_ray_direction)) * uv_repeat.u * uv_repeat.v;
+        hit.uv_coverage *= (
+            hit.cone_width *
+            hit.cone_width *
+            hit.cone_width
+        ) / (
+            uv_repeat.u *
+            uv_repeat.v *
+            hit.NdotRd *
+            abs((1.0f - hit.normal).dot(geometry->transform.scale))
+        );
 
         // Convert Ray Hit to world space, using the "t" value from the local-space trace:
         hit.position = ray[hit.distance];
@@ -160,7 +167,7 @@ struct SceneTracer {
                 if (aux_hit.distance < hit.distance) {
                     hit_geo = geo;
                     hit = aux_hit;
-                    _closest_hit_ray_direction = aux_ray.direction;
+                    hit.NdotRd = -(hit.normal.dot(aux_ray.direction));
                 }
             }
         }

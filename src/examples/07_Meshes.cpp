@@ -25,23 +25,17 @@ struct ExampleApp : SlimApp {
     HUDLine Shader{   "Material : "};
     HUDLine Roughness{"Roughness: "};
     HUDLine Bounces{  "Bounces  : "};
-    HUDLine X{"X: "};
-    HUDLine Y{"Y: "};
-    HUDLine Z{"Z: "};
-    HUDLine I{"I: "};
-    HUD hud{{13}, &FPS};
+    HUD hud{{9}, &FPS};
 
     // Viewport:
-    Camera camera{{-25 * DEG_TO_RAD, 0, 0}, {0, 7, -11}}, *cameras{&camera};
+    Camera camera{{-40 * DEG_TO_RAD, 0, 0}, {1, 50, -50}}, *cameras{&camera};
     Canvas canvas;
     Viewport viewport{canvas, &camera};
 
     // Scene:
-    Light key_light{ {1.0f, 1.0f, 0.65f}, {10, 10, -5}, 1.1f * 40.0f};
-    Light fill_light{{0.65f, 0.65f, 1.0f}, {-10, 10, -5}, 1.2f * 40.0f };
-    Light rim_light{ {1.0f, 0.25f, 0.25f}, {6, 5, 2}, 0.9f * 40.0f};
-    Light glass_light1{ {0.25f, 1.0f, 0.25f}, {-1.3f, 1.6f, -5.0f}, 30.0f};
-    Light glass_light2{ {0.25f, 0.25f, 1.0f}, {1.4f, 2.75f, -5.15f}, 30.0f};
+    Light key_light{ {1.0f, 1.0f, 0.65f}, {25, 15, -15}, 1.1f * 200.0f};
+    Light fill_light{{0.65f, 0.65f, 1.0f}, {-25, 15, -15}, 1.2f * 200.0f };
+    Light rim_light{ {1.0f, 0.25f, 0.25f}, {0, 15, 15}, 0.9f * 200.0f};
     Light *lights{&key_light};
 
     enum MATERIAL {
@@ -65,8 +59,7 @@ struct ExampleApp : SlimApp {
         1.0f, 0.2f,
         MATERIAL_HAS_NORMAL_MAP |
               MATERIAL_HAS_ALBEDO_MAP,
-        2, {2, 3},
-        BRDF_CookTorrance, 4.0f
+        2, {2, 3}
     };
     Material shape_material{0.8f, 0.7f};
     Material Phong{1.0f,0.5f,0,0, {},
@@ -83,7 +76,7 @@ struct ExampleApp : SlimApp {
         IOR_AIR, F0_Aluminium
     };
     Material Glass {
-        0.0f,0.25f,
+        0.1f,0.25f,
         MATERIAL_IS_REFRACTIVE,
         0,{},
         BRDF_CookTorrance, 1.0f, 1.0f, 0.0f,
@@ -92,12 +85,12 @@ struct ExampleApp : SlimApp {
     Material *materials{&floor_material};
 
     Geometry floor {{{},{}, {40, 1, 40}},GeometryType_Quad};
-    Geometry box   {{{},{-5, 3, 0}},   GeometryType_Box, MATERIAL_SHAPE};
-    Geometry tet   {{{},{0, 4, 8}},    GeometryType_Tet, MATERIAL_PHONG};
-    Geometry sphere{{{},{-4, 1.2f, 8}},GeometryType_Sphere,MATERIAL_BLINN};
-    Geometry monkey{{{},{5, 3, 0}},    GeometryType_Mesh,MATERIAL_MIRROR, 0};
-    Geometry dragon{{{},{0, 3, -5}},   GeometryType_Mesh,MATERIAL_GLASS, 1, GEOMETRY_IS_VISIBLE};
-    Geometry dog   {{{},{4, 3, 6}},    GeometryType_Mesh,MATERIAL_DOG, 2};
+    Geometry box   {{{},{-20, 12, 0}},   GeometryType_Box, MATERIAL_SHAPE};
+    Geometry tet   {{{},{0, 16, 32}},    GeometryType_Tet, MATERIAL_PHONG};
+    Geometry sphere{{{},{-16, 4.8f, 32}},GeometryType_Sphere,MATERIAL_BLINN};
+    Geometry monkey{{{},{24, 12, 0}},    GeometryType_Mesh,MATERIAL_MIRROR, 0};
+    Geometry dragon{{{},{4, 12, -20}},   GeometryType_Mesh,MATERIAL_GLASS, 1, GEOMETRY_IS_VISIBLE};
+    Geometry dog   {{{},{16, 12, 24}},    GeometryType_Mesh,MATERIAL_DOG, 2};
     Geometry *geometries{&floor};
 
     Texture textures[4];
@@ -117,18 +110,13 @@ struct ExampleApp : SlimApp {
         String::getFilePath("dog.mesh"   ,strings[2],__FILE__)
     };
 
-    Scene scene{{7,1,5,MATERIAL_COUNT,4,3}, nullptr,
+    Scene scene{{7,1,3,MATERIAL_COUNT,4,3},
                 geometries, cameras, lights, materials, textures, texture_files, meshes, mesh_files};
     Selection selection;
 
     RayTracer ray_tracer{scene};
 
     void OnUpdate(f32 delta_time) override {
-        X.value = glass_light2.position_or_direction.x;
-        Y.value = glass_light2.position_or_direction.y;
-        Z.value = glass_light2.position_or_direction.z;
-        I.value = glass_light2.intensity;
-
         i32 fps = (i32)render_timer.average_frames_per_second;
         FPS.value = fps;
         FPS.value_color = fps >= 60 ? Green : (fps >= 24 ? Cyan : (fps < 12 ? Red : Yellow));
@@ -143,11 +131,12 @@ struct ExampleApp : SlimApp {
         f32 dog_scale    = sinf(elapsed * 1.5f) * 0.02f;
         f32 monkey_scale = sinf(elapsed * 2.5f + 1) * 0.05f;
 
-        dog.transform.scale = 1.0f + dog_scale;
-        dog.transform.scale.y += 2 * dog_scale;
-        dragon.transform.scale = 0.4f;
-        monkey.transform.scale = 0.75f + monkey_scale;
-        monkey.transform.scale.y -= 2 * monkey_scale;
+        dog.transform.scale = 4.0f + dog_scale;
+        dog.transform.scale.y += 2.0f * dog_scale;
+        dragon.transform.scale = 5.0f;
+        monkey.transform.scale = 3.0f + monkey_scale;
+        monkey.transform.scale.y -= 2.0f * monkey_scale;
+        sphere.transform.scale = tet.transform.scale = box.transform.scale = 4.0f;
 
         quat rot = quat::RotationAroundY(delta_time * 0.125f);
         rot = rot.normalized();

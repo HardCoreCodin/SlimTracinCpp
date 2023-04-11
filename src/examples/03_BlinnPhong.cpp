@@ -66,7 +66,7 @@ struct ExampleApp : SlimApp {
         String::getFilePath("floor_normal.texture",string_buffers[1],__FILE__),
     };
 
-    Scene scene{{4,1,3,MATERIAL_COUNT,2}, nullptr,
+    Scene scene{{4,1,3,MATERIAL_COUNT,2},
                 geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 

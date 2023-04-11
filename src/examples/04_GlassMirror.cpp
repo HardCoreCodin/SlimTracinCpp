@@ -30,9 +30,9 @@ struct ExampleApp : SlimApp {
     Viewport viewport{canvas, &camera};
 
     // Scene:
-    Light key_light{ {1.0f, 1.0f, 0.65f}, {10, 13, -7}, 130.0f};
-    Light fill_light{{0.65f, 0.65f, 1.0f}, {-15, 15, -3}, 130.0f};
-    Light rim_light{ {1.0f, 0.25f, 0.25f}, {8, 7, 15}, 130.0f};
+    Light key_light{ {1.0f, 1.0f, 0.65f}, {10, 13, -7}, 200.0f};
+    Light fill_light{{0.65f, 0.65f, 1.0f}, {-15, 15, -3}, 200.0f};
+    Light rim_light{ {1.0f, 0.25f, 0.25f}, {8, 7, 15}, 200.0f};
     Light *lights{&key_light};
 
     enum MATERIAL {
@@ -57,7 +57,7 @@ struct ExampleApp : SlimApp {
         IOR_AIR, F0_Aluminium
     };
     Material Glass {
-        0.0f,0.02f,
+        0.1f,0.25f,
         MATERIAL_IS_REFRACTIVE |
               MATERIAL_HAS_NORMAL_MAP,
         2,{0, 1},
@@ -69,9 +69,9 @@ struct ExampleApp : SlimApp {
     OrientationUsingQuaternion wall_rot{75 * DEG_TO_RAD, 0, 90.0f * DEG_TO_RAD};
     Geometry floor {{{},{       },{40, 1, 40}},GeometryType_Quad,  MATERIAL_FLOOR};
     Geometry wall  {{wall_rot, {-6, 8, 15}, {6, 1, 10}}, GeometryType_Quad, MATERIAL_MIRROR};
-    Geometry box{   {{},{-9, 8, -2},{2, 2, 3}},GeometryType_Box,   MATERIAL_GLASS};
-    Geometry tet{   {{},{-3, 5, -3},{4, 3, 4}},GeometryType_Tet,   MATERIAL_GLASS};
-    Geometry sphere{{{},{ 3, 7, 2  },{4, 3, 3}},GeometryType_Sphere,MATERIAL_GLASS};
+    Geometry box{   {{},{-9, 8, -2},{2, 2, 3}},GeometryType_Box,   MATERIAL_GLASS, 0, GEOMETRY_IS_VISIBLE};
+    Geometry tet{   {{},{-3, 5, -3},{4, 3, 4}},GeometryType_Tet,   MATERIAL_GLASS, 0, GEOMETRY_IS_VISIBLE};
+    Geometry sphere{{{},{ 3, 7, 2  },{4, 3, 3}},GeometryType_Sphere,MATERIAL_GLASS, 0, GEOMETRY_IS_VISIBLE};
     Geometry *geometries{&floor};
 
     Texture textures[2];
@@ -81,7 +81,7 @@ struct ExampleApp : SlimApp {
         String::getFilePath("floor_normal.texture",string_buffers[1],__FILE__),
     };
 
-    Scene scene{{5,1,3,MATERIAL_COUNT,2}, nullptr,
+    Scene scene{{5,1,3,MATERIAL_COUNT,2},
                 geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 

@@ -333,11 +333,9 @@ struct BVHBuilder {
                 triangle.uv1 = mesh.vertex_uvs[indices.v1];
                 triangle.uv2 = mesh.vertex_uvs[indices.v2];
                 triangle.uv3 = mesh.vertex_uvs[indices.v3];
-                area_of_uv = fabsf(
-                    (triangle.uv2.u - triangle.uv1.u) * (triangle.uv3.v - triangle.uv1.v) -
-                       (triangle.uv3.u - triangle.uv1.u) * (triangle.uv2.v - triangle.uv1.v)
-                       );
-                triangle.uv_coverage = area_of_uv / area_of_parallelogram;
+                area_of_uv = (triangle.uv2.u - triangle.uv1.u) * (triangle.uv3.v - triangle.uv1.v) -
+                             (triangle.uv3.u - triangle.uv1.u) * (triangle.uv2.v - triangle.uv1.v);
+                triangle.uv_coverage = fabsf(area_of_uv / area_of_parallelogram);
             }
         }
     }

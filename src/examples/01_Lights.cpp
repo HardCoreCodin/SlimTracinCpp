@@ -25,9 +25,9 @@ struct ExampleApp : SlimApp {
     Viewport viewport{canvas, &camera};
 
     // Scene:
-    Light key_light{ {1.0f, 1.0f, 0.65f}, {20, 17, -5}, 1.1f * 150.0f};
-    Light fill_light{{0.65f, 0.65f, 1.0f}, {-20, 15, -5}, 1.2f * 150.0f };
-    Light rim_light{ {1.0f, 0.25f, 0.25f}, {2, 5, 10}, 0.9f * 150.0f};
+    Light key_light{ {1.0f, 1.0f, 0.65f}, {20, 7, -5}, 1.1f * 130.0f};
+    Light fill_light{{0.65f, 0.65f, 1.0f}, {-20, 6, -5}, 1.2f * 130.0f };
+    Light rim_light{ {1.0f, 0.25f, 0.25f}, {2, 5, 10}, 0.9f * 130.0f};
     Light *lights{&key_light};
 
     u8 flags{MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
@@ -44,7 +44,7 @@ struct ExampleApp : SlimApp {
         String::getFilePath("floor_normal.texture",string_buffers[1],__FILE__),
     };
 
-    Scene scene{{1,1,3,1,2}, nullptr,
+    Scene scene{{1,1,3,1,2},
                 geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 

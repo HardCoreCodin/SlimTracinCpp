@@ -42,8 +42,7 @@ struct ExampleApp : SlimApp {
     Material materials[GRID_SIZE][GRID_SIZE];
     Geometry geometries[GRID_SIZE][GRID_SIZE];
     SceneCounts counts{OBJECT_COUNT, 1, 4, OBJECT_COUNT};
-    Scene scene{counts, nullptr, &geometries[0][0],
-                &camera, lights, &materials[0][0]};
+    Scene scene{counts, &geometries[0][0], &camera, lights, &materials[0][0]};
     Selection selection;
     RayTracer ray_tracer{scene};
 

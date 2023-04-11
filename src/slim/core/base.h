@@ -47,7 +47,7 @@
     #endif
 
     #define checkErrors() gpuErrchk(cudaPeekAtLastError())
-    #define uploadConstant(cpu_ptr, constant)      gpuErrchk(cudaMemcpyToSymbol(constant, cpu_ptr, sizeof((cpu_ptr)[0])))
+    #define uploadConstant(cpu_ptr, constant)      gpuErrchk(cudaMemcpyToSymbol(constant, cpu_ptr, sizeof(constant)))
     #define uploadNto(cpu_ptr, gpu_ptr, N, offset) gpuErrchk(cudaMemcpy(&((gpu_ptr)[(offset)]), (cpu_ptr), sizeof((cpu_ptr)[0]) * (N), cudaMemcpyHostToDevice))
     #define uploadN(  cpu_ptr, gpu_ptr, N        ) gpuErrchk(cudaMemcpy(&((gpu_ptr)[0])       , (cpu_ptr), sizeof((cpu_ptr)[0]) * (N), cudaMemcpyHostToDevice))
     #define downloadN(gpu_ptr, cpu_ptr, N)         gpuErrchk(cudaMemcpy((cpu_ptr), &((gpu_ptr)[0])       , sizeof((cpu_ptr)[0]) * (N), cudaMemcpyDeviceToHost))
@@ -610,17 +610,6 @@ enum ColorID {
     F0_Gold,
     F0_Aluminium,
     F0_Silver
-};
-static ColorID MIP_LEVEL_COLORS[9] = {
-        BrightRed,
-        BrightYellow,
-        BrightGreen,
-        BrightMagenta,
-        BrightCyan,
-        BrightBlue,
-        BrightGrey,
-        Grey,
-        DarkGrey
 };
 
 struct ByteColor {
