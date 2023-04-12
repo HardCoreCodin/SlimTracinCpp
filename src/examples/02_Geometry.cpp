@@ -35,9 +35,10 @@ struct ExampleApp : SlimApp {
     Light rim_light{ {1.0f, 0.25f, 0.25f}, {5, 8, 15}, 0.9f * 150.0f};
     Light *lights{&key_light};
 
-    u8 flags{MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
-    Material shape_material{0.8f, 0.7f, flags, 2, {0, 1}};
-    Material floor_material{0.8f, 0.2f, flags, 2, {0, 1}};
+    Material shape_material{0.8f, 0.7f};
+    Material floor_material{0.8f, 0.2f,
+                            MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP,
+                            2, {0, 1}};
     Material *materials{&shape_material};
 
     Geometry floor {{{},{       },{40, 1, 40}},GeometryType_Quad,1};
@@ -91,6 +92,7 @@ struct ExampleApp : SlimApp {
                     drawBVH(scene.meshes[geometries[i].id].bvh, geometries[i].transform, viewport);
             drawBVH(scene.bvh, {}, viewport);
         }
+        selection.geometry = &sphere;
         if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
         if (hud.enabled) drawHUD(hud, canvas);
         canvas.drawToWindow();

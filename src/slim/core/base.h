@@ -1227,30 +1227,16 @@ struct ByteColorImage : Image<ByteColor> {};
 #define CANVAS_SIZE (CANVAS_PIXELS_SIZE + CANVAS_DEPTHS_SIZE)
 
 struct Dimensions {
-    u32 width_times_height{(u32)DEFAULT_WIDTH * (u32)DEFAULT_HEIGHT};
-    f32 width_over_height{(f32)DEFAULT_WIDTH / (f32)DEFAULT_HEIGHT};
-    f32 height_over_width{(f32)DEFAULT_HEIGHT / (f32)DEFAULT_WIDTH};
-    f32 f_width{(f32)DEFAULT_WIDTH};
-    f32 f_height{(f32)DEFAULT_HEIGHT};
-    f32 h_width{(f32)DEFAULT_WIDTH * 0.5f};
-    f32 h_height{(f32)DEFAULT_HEIGHT * 0.5f};
-    u16 width{DEFAULT_WIDTH};
-    u16 height{DEFAULT_HEIGHT};
-    u16 stride{DEFAULT_WIDTH};
-
-    Dimensions() = default;
-    Dimensions(u16 Width, u16 Height, u16 Stride) :
-            width_times_height{(u32)Width * (u32)Height},
-            width_over_height{(f32)Width / (f32)Height},
-            height_over_width{(f32)Height / (f32)Width},
-            f_width{(f32)Width},
-            f_height{(f32)Height},
-            h_width{(f32)Width * 0.5f},
-            h_height{(f32)Height * 0.5f},
-            width{Width},
-            height{Height},
-            stride{Stride}
-    {}
+    u32 width_times_height;
+    f32 width_over_height;
+    f32 height_over_width;
+    f32 f_width;
+    f32 f_height;
+    f32 h_width;
+    f32 h_height;
+    u16 width;
+    u16 height;
+    u16 stride;
 
     void update(u16 Width, u16 Height) {
         width = Width;

@@ -62,6 +62,7 @@ struct Trace {
         ray.reset(projection.camera_position, direction.normalized());
         surface.geometry = scene_tracer.trace(ray, hit, scene);
 
+        bool render_beauty = settings.render_mode == RenderMode_Beauty;
         bool hit_found = surface.geometry != nullptr;
         if (hit_found) {
             hit.scaling_factor = 1.0f / sqrtf(
@@ -71,26 +72,25 @@ struct Trace {
             scene_tracer.finalizeHit(surface.geometry, scene.materials, ray, hit);
             surface.prepareForShading(ray, hit, scene.materials, scene.textures);
             z_depth = projection.getDepthAt(hit.position);
-
-            switch (settings.render_mode) {
-                case RenderMode_UVs      : color = getColorByUV(hit.uv); break;
-                case RenderMode_Depth    : color = getColorByDistance(hit.distance); break;
-//                case RenderMode_MipLevel : color = surface.material->isTextured() ? settings.mip_level_colors[scene.textures[0].mipLevel(hit.uv_coverage)] : Grey;  break;
-                case RenderMode_MipLevel : color = scene.counts.textures ? settings.mip_level_colors[scene.textures[0].mipLevel(hit.uv_coverage)] : Grey;  break;
-                case RenderMode_Normals  : color = directionToColor(hit.normal);  break;
-                case RenderMode_NormalMap: color = directionToColor(sampleNormal(*surface.material, hit, scene.textures));  break;
-                default: {
-                    if (!hit.from_behind && surface.material->isEmissive())
-                        color = surface.material->emission;
-                    else if (scene.lights)
-                        shadePixel(scene, settings, color);
+            if (render_beauty) {
+                if (!hit.from_behind && surface.material->isEmissive()) color = surface.material->emission;
+                else if (scene.lights) shadePixel(scene, settings, color);
+            } else
+                switch (settings.render_mode) {
+                    case RenderMode_UVs      : color = getColorByUV(hit.uv); break;
+                    case RenderMode_Depth    : color = getColorByDistance(hit.distance); break;
+                    case RenderMode_Normals  : color = directionToColor(hit.normal);  break;
+                    case RenderMode_NormalMap: color = directionToColor(sampleNormal(*surface.material, hit, scene.textures));  break;
+                    default                  : color = scene.counts.textures ?
+                        settings.mip_level_colors[scene.textures[0].mipLevel(hit.uv_coverage)] : Grey;
                 }
-            }
-        } else {
-            hit_found = lights_shader.shadeLights(scene.lights, scene.counts.lights, projection.camera_position, ray.direction, INFINITY, color);
-            if (hit_found) z_depth = INFINITY;
         }
-        if (hit_found && settings.render_mode == RenderMode_Beauty) color.applyToneMapping();
+        if (render_beauty) {
+            hit_found = hit_found || lights_shader.shadeLights(scene.lights, scene.counts.lights,
+                                                               projection.camera_position, ray.direction,
+                                                               INFINITY, color);
+            if (hit_found) color.applyToneMapping();
+        }
     }
 
     INLINE_XPU void shadePixel(const Scene &scene, const RayTracerSettings &settings, Color &color) {
@@ -167,35 +167,33 @@ struct Trace {
 #define SCENE_BVH_STACK_SIZE 6
 #define SLIM_THREADS_PER_BLOCK 32
 
-Pixel *d_pixels;
-f32 *d_depths;
-
 __constant__ SceneData d_scene;
-__constant__ Dimensions d_dimensions;
+__constant__ CanvasData d_canvas;
 __constant__ RayTracerSettings d_settings;
 __constant__ u8 d_projection_buffer[sizeof(RayTracerProjection)];
 
 SceneData t_scene;
+CanvasData t_canvas;
 BVHNode *d_mesh_bvh_nodes;
 Triangle *d_triangles;
 TextureMip *d_texture_mips;
 TexelQuad *d_texel_quads;
 
-__global__ void d_render(Pixel *pixels, f32 *depths) {
+__global__ void d_render() {
     u32 i = blockDim.x * blockIdx.x + threadIdx.x;
-    if (i >= d_dimensions.width_times_height)
+    if (i >= d_canvas.dimensions.width_times_height)
         return;
 
     u32 scene_stack[SCENE_BVH_STACK_SIZE], mesh_stack[MESH_BVH_STACK_SIZE];
     Trace trace{scene_stack, mesh_stack};
-
-    trace.ray.pixel_coords.x = (i32)(i % (u32)d_dimensions.width);
-    trace.ray.pixel_coords.y = (i32)(i / (u32)d_dimensions.width);
-    trace.screen_center_to_pixel_center.x = 0.5f - d_dimensions.h_width  + (f32)trace.ray.pixel_coords.x;
-    trace.screen_center_to_pixel_center.y = d_dimensions.h_height - 0.5f - (f32)trace.ray.pixel_coords.y;
-
-    RayTracerProjection &projection{*(RayTracerProjection*)(&d_projection_buffer[0])};
     Scene &scene{*((Scene*)(&d_scene))};
+    Canvas &canvas{*((Canvas*)(&d_canvas))};
+    RayTracerProjection &projection{*(RayTracerProjection*)(&d_projection_buffer[0])};
+
+    trace.ray.pixel_coords.x = (i32)(i % (u32)canvas.dimensions.width);
+    trace.ray.pixel_coords.y = (i32)(i / (u32)canvas.dimensions.width);
+    trace.screen_center_to_pixel_center.x = 0.5f - canvas.dimensions.h_width  + (f32)trace.ray.pixel_coords.x;
+    trace.screen_center_to_pixel_center.y = canvas.dimensions.h_height - 0.5f - (f32)trace.ray.pixel_coords.y;
 
     Color color{};
     vec3 direction{
@@ -205,7 +203,6 @@ __global__ void d_render(Pixel *pixels, f32 *depths) {
     };
     trace.renderPixel(scene, d_settings, projection, direction,  color);
 
-    Canvas canvas{pixels, depths, d_dimensions};
     canvas.setPixel(trace.ray.pixel_coords.x, trace.ray.pixel_coords.y, color, -1, trace.z_depth);
 }
 #else
@@ -287,11 +284,14 @@ struct RayTracer {
 
 #ifdef __CUDACC__
     void renderOnGPU(const Canvas &canvas) {
+        t_canvas.dimensions = canvas.dimensions;
+        t_canvas.antialias = canvas.antialias;
+        uploadConstant(&t_canvas, d_canvas)
         uploadConstant(&settings, d_settings)
-        uploadConstant(&canvas.dimensions, d_dimensions)
         uploadConstant((u8*)(&projection), d_projection_buffer)
 
-        u32 pixel_count = canvas.dimensions.width_times_height;
+        u32 pixel_count = canvas.dimensions.width_times_height * (canvas.antialias == SSAA ? 4 : 1);
+        u32 depths_count = canvas.dimensions.width_times_height * (canvas.antialias == NoAA ? 1 : 4);
         u32 threads = SLIM_THREADS_PER_BLOCK;
         u32 blocks  = pixel_count / threads;
         if (pixel_count < threads) {
@@ -300,17 +300,17 @@ struct RayTracer {
         } else if (pixel_count % threads)
             blocks++;
 
-        d_render<<<blocks, threads>>>(d_pixels, d_depths);
+        d_render<<<blocks, threads>>>();
 
         checkErrors()
-        downloadN(d_pixels, canvas.pixels, pixel_count)
-        downloadN(d_depths, canvas.depths, pixel_count)
+        downloadN(t_canvas.pixels, canvas.pixels, pixel_count)
+        downloadN(t_canvas.depths, canvas.depths, depths_count)
     }
 
     void initDataOnGPU() {
         t_scene = scene;
-        gpuErrchk(cudaMalloc(&d_pixels, sizeof(Pixel) * MAX_WINDOW_SIZE))
-        gpuErrchk(cudaMalloc(&d_depths, sizeof(f32) * MAX_WINDOW_SIZE))
+        gpuErrchk(cudaMalloc(&t_canvas.pixels, sizeof(Pixel) * MAX_WINDOW_SIZE * 4))
+        gpuErrchk(cudaMalloc(&t_canvas.depths, sizeof(f32) * MAX_WINDOW_SIZE * 4))
         gpuErrchk(cudaMalloc(&t_scene.bvh_leaf_geometry_indices, sizeof(u32) * scene.counts.geometries))
         gpuErrchk(cudaMalloc(&t_scene.bvh.nodes,sizeof(BVHNode)  * scene.counts.geometries * 2))
 
