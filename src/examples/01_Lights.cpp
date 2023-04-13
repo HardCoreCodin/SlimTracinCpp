@@ -1,7 +1,7 @@
 #include "../slim/scene/selection.h"
 #include "../slim/draw/hud.h"
 #include "../slim/draw/selection.h"
-#include "../slim/renderer/ray_tracer.h"
+#include "../slim/renderer/renderer.h"
 #include "../slim/app.h"
 
 
@@ -48,7 +48,7 @@ struct ExampleApp : SlimApp {
                 geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 
-    RayTracer ray_tracer{scene};
+    RayTracingRenderer renderer{scene};
 
     void OnUpdate(f32 delta_time) override {
         i32 fps = (i32)render_timer.average_frames_per_second;
@@ -60,7 +60,7 @@ struct ExampleApp : SlimApp {
     }
 
     void OnRender() override {
-        ray_tracer.render(viewport, true, use_gpu);
+        renderer.render(viewport, true, use_gpu);
         if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
         if (hud.enabled) drawHUD(hud, canvas);
         canvas.drawToWindow();
@@ -71,14 +71,14 @@ struct ExampleApp : SlimApp {
             if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
             if (key == 'A' && controls::is_pressed::shift) { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
             if (key == 'G') use_gpu = !use_gpu;
-            if (key == '1') ray_tracer.settings.render_mode = RenderMode_Beauty;
-            if (key == '2') ray_tracer.settings.render_mode = RenderMode_Depth;
-            if (key == '3') ray_tracer.settings.render_mode = RenderMode_Normals;
-            if (key == '4') ray_tracer.settings.render_mode = RenderMode_NormalMap;
-            if (key == '5') ray_tracer.settings.render_mode = RenderMode_MipLevel;
-            if (key == '6') ray_tracer.settings.render_mode = RenderMode_UVs;
+            if (key == '1') renderer.settings.render_mode = RenderMode_Beauty;
+            if (key == '2') renderer.settings.render_mode = RenderMode_Depth;
+            if (key == '3') renderer.settings.render_mode = RenderMode_Normals;
+            if (key == '4') renderer.settings.render_mode = RenderMode_NormalMap;
+            if (key == '5') renderer.settings.render_mode = RenderMode_MipLevel;
+            if (key == '6') renderer.settings.render_mode = RenderMode_UVs;
             const char* mode;
-            switch ( ray_tracer.settings.render_mode) {
+            switch ( renderer.settings.render_mode) {
                 case RenderMode_Beauty:    mode = "Beauty"; break;
                 case RenderMode_Depth:     mode = "Depth"; break;
                 case RenderMode_Normals:   mode = "Normals"; break;

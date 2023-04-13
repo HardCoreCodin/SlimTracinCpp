@@ -174,18 +174,19 @@ struct Ray {
         return side;
     }
 
-    INLINE_XPU bool hitsDefaultSphere(RayHit &hit, bool is_transparent = false) const {
+    INLINE_XPU bool hitsDefaultSphere(RayHit &hit, bool is_transparent = false, f32 *out_squared_distance_to_center = nullptr) const {
         f32 t_to_closest = -(origin.dot(direction));
         if (t_to_closest <= 0) // Ray is aiming away from the sphere
             return false;
 
         f32 direction_squared_length = direction.squaredLength();
-        f32 delta_squared = t_to_closest*t_to_closest + (1 - origin.squaredLength()) * direction_squared_length;
-        if (delta_squared <= 0) // Ray missed the sphere
+        f32 squared_distance_to_center = origin.squaredLength() * direction_squared_length - t_to_closest*t_to_closest;
+        if (squared_distance_to_center > 1.0f) // Ray missed the sphere
             return false;
 
-        f32 delta = sqrtf(delta_squared);
-        f32 t = (t_to_closest - delta) / direction_squared_length;
+        f32 delta = sqrtf( direction_squared_length - squared_distance_to_center);
+        direction_squared_length = 1.0f / direction_squared_length;
+        f32 t = (t_to_closest - delta) * direction_squared_length;
         if (t > hit.distance)
             return false;
 
@@ -194,7 +195,7 @@ struct Ray {
 
         hit.from_behind = t <= 0 || (is_transparent && hit.uv.onCheckerboard());
         if (hit.from_behind) {
-            t = (t_to_closest + delta) / direction_squared_length;
+            t = (t_to_closest + delta) * direction_squared_length;
             if (t <= 0 || t > hit.distance)
                 return false;
 
@@ -206,6 +207,9 @@ struct Ray {
 
         hit.distance = t;
         hit.uv_coverage = 1.0f / UNIT_SPHERE_AREA_OVER_SIX;
+
+        if (out_squared_distance_to_center)
+            *out_squared_distance_to_center = squared_distance_to_center * direction_squared_length;
 
         return true;
     }

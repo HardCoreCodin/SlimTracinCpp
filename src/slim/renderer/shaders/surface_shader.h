@@ -1,9 +1,10 @@
 #pragma once
 
-#include "../core/ray.h"
-#include "../core/texture.h"
-#include "../scene/material.h"
-#include "./scene_tracer.h"
+#include "../../core/ray.h"
+#include "../../core/texture.h"
+#include "../../scene/material.h"
+#include "../tracers/scene_tracer.h"
+#include "./light_shader.h"
 
 
 INLINE_XPU Color sample(const Material &material, u8 slot, const Texture *textures, vec2 uv, f32 uv_coverage) {
@@ -29,85 +30,6 @@ INLINE_XPU Color sampleNormal(Material &material, const RayHit &hit, const Textu
 INLINE_XPU vec3 sampleNormal(Material &material, const RayHit &hit, const Texture *textures, const vec3 &normal) {
     return rotateNormal(normal, sampleNormal(material, hit, textures), material.normal_magnitude);
 }
-
-INLINE_XPU vec3 getAreaLightVector(const Transform &transform, vec3 P, vec3 *v) {
-    const f32 sx = transform.scale.x;
-    const f32 sz = transform.scale.z;
-    if (sx == 0 || sz == 0)
-        return 0.0f;
-
-    vec3 U{transform.orientation * vec3{sx < 0 ? -sx : sx, 0.0f, 0.0f}};
-    vec3 V{transform.orientation * vec3{0.0f, 0.0f , sz < 0 ? -sz : sz}};
-    v[0] = transform.position - U - V;
-    v[1] = transform.position + U - V;
-    v[2] = transform.position + U + V;
-    v[3] = transform.position - U + V;
-
-    vec3 u1n{(v[0] - P).normalized()};
-    vec3 u2n{(v[1] - P).normalized()};
-    vec3 u3n{(v[2] - P).normalized()};
-    vec3 u4n{(v[3] - P).normalized()};
-
-    return {
-        u1n.cross(u2n) * (acosf(u1n.dot(u2n)) * 0.5f) +
-        u2n.cross(u3n) * (acosf(u2n.dot(u3n)) * 0.5f) +
-        u3n.cross(u4n) * (acosf(u3n.dot(u4n)) * 0.5f) +
-        u4n.cross(u1n) * (acosf(u4n.dot(u1n)) * 0.5f)
-    };
-}
-
-struct LightsShader {
-    f32 b = 0, c = 0, t_near = 0, t_far = 0, t_max = 0, closest_hit_distance = 0;
-
-    INLINE_XPU bool hit(const vec3 &Ro, const vec3 &Rd, const vec3 &target, f32 inverse_scale) {
-        vec3 rc{(target - Ro) * inverse_scale};
-
-        b = Rd.dot(rc);
-        c = rc.squaredLength() - 1;
-        f32 h = b*b - c;
-
-        if (h < 0)
-            return false;
-
-        h = sqrtf(h);
-        t_near = b - h;
-        t_far  = b + h;
-
-        return t_far > 0 && t_near < t_max;
-    }
-
-    INLINE_XPU f32 getVolumeDensity() {
-        f32 t1 = t_near > 0 ? t_near : 0;
-        f32 t2 = t_far < t_max ? t_far : t_max;
-
-        // analytical integration of an inverse squared density
-        return (c*t1 - b*t1*t1 + t1*t1*t1/3.0f - (
-            c*t2 - b*t2*t2 + t2*t2*t2/3.0f)
-               ) * (3.0f / 4.0f);
-    }
-
-    INLINE_XPU bool shadeLights(const Light *lights, const u32 light_count, const vec3 &Ro, const vec3 &Rd, f32 max_distance, Color &color) {
-        f32 scale, inverse_scale, density;
-        bool hit_light = false;
-
-        closest_hit_distance = INFINITY;
-        for (u32 i = 0; i < light_count; i++) {
-            const Light &light = lights[i];
-
-            scale = light.intensity / 64.0f;
-            inverse_scale = 1.0f / scale;
-            t_max = max_distance * inverse_scale;
-            if (hit(Ro, Rd, light.position_or_direction, inverse_scale)) {
-                hit_light = true;
-                density = getVolumeDensity();
-                closest_hit_distance = Min(closest_hit_distance, t_far);
-                color = light.color.scaleAdd(  pow(density, 8.0f) * 4, color);
-            }
-        }
-
-        return hit_light;
-    }
-};
 
 struct SurfaceShader {
     Geometry *geometry = nullptr;
@@ -206,34 +128,42 @@ struct SurfaceShader {
         return NdotL > 0.0f;
     }
 
-    INLINE_XPU bool shadeFromEmissiveQuads(const Scene &scene, Ray &ray, RayHit &hit, Color &color) {
+    INLINE_XPU bool shadeFromEmissiveQuads(const Scene &scene, Ray &shadow_ray, RayHit &shadow_hit, Color &color) {
         bool found = false;
 
-        vec3 &p{hit.position};
         vec3 *v = emissive_quad_vertices;
         vec3 Ro;
+        f32 Ld_rcp, sphere_squared_distance_To_center;
 
-        for (u32 i = 0; i < scene.counts.geometries; i++) {
-            Geometry &quad{scene.geometries[i]};
-            Transform &area_light{quad.transform};
-            Material &emissive_material = scene.materials[quad.material_id];
-            if (quad.type != GeometryType_Quad || !(emissive_material.isEmissive()))
+//        if (geometry->type != GeometryType_Sphere) return false;
+
+        Transform *xform;
+        Geometry *shadowing_geo, *emissive_quad = scene.geometries;
+        for (u32 i = 0; i < scene.counts.geometries; i++, emissive_quad++) {
+            if (emissive_quad == geometry ||
+                emissive_quad->type != GeometryType_Quad ||
+                !(scene.materials[emissive_quad->material_id].isEmissive()))
                 continue;
 
-            L = area_light.position - P;
+            xform = &emissive_quad->transform;
+            L = emissive_quad->transform.position - P;
             NdotL = N.dot(L);
-            if (NdotL <= 0.0f || L.dot(area_light.orientation * vec3{0.0f, -1.0f, 1.0f}) <= 0.0f)
+            if (NdotL <= 0.0f)// || L.dot(xform->orientation * vec3{0.0f, -1.0f, 1.0f}) <= 0.0f)
                 continue;
 
-            L = L.normalized();
+            Ld2 = L.squaredLength();
+            Ld = sqrt(Ld2);
+            Ld_rcp = 1.0f / Ld;
+            L *= Ld_rcp;
+            NdotL *= Ld_rcp;
             Ro = L.scaleAdd(TRACE_OFFSET, P);
-            ray.localize(Ro, L, area_light);
-            if (ray.hitsDefaultQuad(hit, quad.flags & GEOMETRY_IS_TRANSPARENT) &&
-                hit.distance < hit.distance) {
+            shadow_ray.localize(Ro, L, *xform);
+            shadow_hit.distance = INFINITY;
+            shadow_ray.direction = shadow_ray.direction.normalized();
+            if (shadow_ray.hitsDefaultQuad(shadow_hit, emissive_quad->flags & GEOMETRY_IS_TRANSPARENT))
                 found = true;
-            }
 
-            f32 emission_intensity = N.dot(getAreaLightVector(area_light, P, v));
+            f32 emission_intensity = N.dot(getAreaLightVector(*xform, P, v));
             if (emission_intensity > 0) {
                 bool skip = true;
                 for (u8 j = 0; j < 4; j++) {
@@ -245,41 +175,32 @@ struct SurfaceShader {
                 if (skip)
                     continue;
 
-                f32 shaded_light = 1;
-                for (u32 s = 0; s < scene.counts.geometries; s++) {
-                    if (s == i)
+                f32 shaded_light = 1.0f;
+                shadowing_geo = scene.geometries;
+                for (u32 s = 0; s < scene.counts.geometries; s++, shadowing_geo++) {
+                    if (shadowing_geo == emissive_quad||
+                        shadowing_geo == geometry)
                         continue;
 
-                    Geometry &shadowing_primitive = scene.geometries[s];
-//                    if (N.dot(shadowing_primitive.transform.position - quad.transform.position) >= 0.0f)
-//                        continue;
-
-                    ray.localize(Ro, L, shadowing_primitive.transform);
-                    hit.distance = hit.distance;
-                    f32 d = 1;
-                    if (shadowing_primitive.type == GeometryType_Sphere) {
-                        if (ray.hitsDefaultSphere(hit, shadowing_primitive.flags & GEOMETRY_IS_TRANSPARENT))
-                            d -= (1.0f - hit.distance) / (hit.distance * emission_intensity * 3);
-                    } else if (shadowing_primitive.type == GeometryType_Quad) {
-                        if (ray.hitsDefaultQuad(hit, shadowing_primitive.flags & GEOMETRY_IS_TRANSPARENT)) {
-                            p.y = 0;
-                            p.x = p.x < 0 ? -p.x : p.x;
-                            p.z = p.z < 0 ? -p.z : p.z;
-                            if (p.x > p.z) {
-                                p.y = p.z;
-                                p.z = p.x;
-                                p.x = p.y;
-                                p.y = 0;
-                            }
-                            d -= (1.0f - p.z) / (hit.distance * emission_intensity);
+                    shadow_ray.localize(Ro, L, shadowing_geo->transform);
+                    shadow_hit.distance = INFINITY;
+                    shadow_ray.direction = shadow_ray.direction.normalized();
+                    f32 d = 1.0f;
+                    if (shadowing_geo->type == GeometryType_Sphere) {
+                        if (shadow_ray.hitsDefaultSphere(shadow_hit, shadowing_geo->flags & GEOMETRY_IS_TRANSPARENT, &sphere_squared_distance_To_center)) {
+                            d -= (1.0f - sqrtf(sphere_squared_distance_To_center)) /
+                                 (shadow_hit.distance * emission_intensity * 3.0f);
                         }
+                    } else if (shadowing_geo->type == GeometryType_Quad) {
+                        if (shadow_ray.hitsDefaultQuad(shadow_hit, shadowing_geo->flags & GEOMETRY_IS_TRANSPARENT))
+                            d -= 3.0f * (1.0f - Max(abs(shadow_hit.position.x), abs(shadow_hit.position.z))) /
+                                (shadow_hit.distance * emission_intensity);
                     }
-                    if (d < shaded_light)
-                        shaded_light = d;
+                    shaded_light = Min(shaded_light, d);
                 }
 
                 if (shaded_light > 0.0f)
-                    color = radianceFraction().mulAdd(emissive_material.emission * (emission_intensity * shaded_light), color);
+                    color = radianceFraction().mulAdd(scene.materials[emissive_quad->material_id].emission * (emission_intensity * shaded_light * 7.0f), color);
             }
         }
 

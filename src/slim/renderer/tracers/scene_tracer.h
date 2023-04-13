@@ -1,7 +1,7 @@
 #pragma once
 
-#include "./mesh_tracer.h"
-#include "../scene/scene.h"
+#include "mesh_tracer.h"
+#include "../../scene/scene.h"
 
 struct SceneTracer {
     MeshTracer mesh_tracer{nullptr};
@@ -58,18 +58,16 @@ struct SceneTracer {
         // Compute uvs and uv-coverage using Ray Cones:
         // Note: This is done while the hit is still in LOCAL space and using its LOCAL and PRE-NORMALIZED ray direction
         hit.cone_width = hit.distance * hit.scaling_factor;
-        hit.uv_coverage *= (
-            hit.cone_width *
-            hit.cone_width *
-            hit.cone_width
-        ) / (
+        hit.cone_width *= hit.cone_width;
+        hit.cone_width *= hit.cone_width;
+        hit.uv_coverage *= hit.cone_width / (
             uv_repeat.u *
             uv_repeat.v *
             hit.NdotRd *
             abs((1.0f - hit.normal).dot(geometry->transform.scale))
         );
 
-        // Convert Ray Hit to world space, using the "t" value from the local-space trace:
+        // Convert Ray Hit to world space, using the "t" value from the local-space ray_tracer:
         hit.position = ray[hit.distance];
         hit.normal = geometry->transform.externDir(hit.normal); // Normalized
     }

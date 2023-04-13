@@ -264,6 +264,7 @@ struct Scene : SceneData {
                 xform.scale = light_radius;
                 xform.orientation.reset();
 
+                local_hit.distance = INFINITY;
                 local_ray.localize(ray, xform);
                 if (local_ray.hitsDefaultSphere(local_hit)) {
                     hit = local_hit;

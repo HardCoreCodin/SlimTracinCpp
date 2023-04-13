@@ -2,7 +2,7 @@
 #include "../slim/draw/bvh.h"
 #include "../slim/draw/hud.h"
 #include "../slim/draw/selection.h"
-#include "../slim/renderer/ray_tracer.h"
+#include "../slim/renderer/renderer.h"
 #include "../slim/app.h"
 
 // Or using the single-header file:
@@ -28,7 +28,7 @@ struct ExampleApp : SlimApp {
     HUD hud{{4}, &FPS};
 
     // Viewport:
-    Camera camera{{}, {-1.0f, -1.0f, -20.0f}};
+    Camera camera{{}, {-2.0f, -1.0f, -20.0f}};
     Canvas canvas;
     Viewport viewport{canvas, &camera};
 
@@ -44,7 +44,7 @@ struct ExampleApp : SlimApp {
     SceneCounts counts{OBJECT_COUNT, 1, 4, OBJECT_COUNT};
     Scene scene{counts, &geometries[0][0], &camera, lights, &materials[0][0]};
     Selection selection;
-    RayTracer ray_tracer{scene};
+    RayTracingRenderer renderer{scene};
 
     ExampleApp() {
         Color plastic{0.04f};
@@ -64,6 +64,7 @@ struct ExampleApp : SlimApp {
                 mat.reflectivity = plastic.lerpTo(mat.albedo, mat.metalness);
             }
         }
+        uploadMaterials(scene);
     }
     void OnUpdate(f32 delta_time) override {
         i32 fps = (i32)render_timer.average_frames_per_second;
@@ -75,7 +76,7 @@ struct ExampleApp : SlimApp {
     }
 
     void OnRender() override {
-        ray_tracer.render(viewport, true, use_gpu);
+        renderer.render(viewport, true, use_gpu);
         if (draw_BVH) drawBVH(scene.bvh, {}, viewport);
         if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
         if (hud.enabled) drawHUD(hud, canvas);

@@ -4,23 +4,11 @@
 #include "../math/vec3.h"
 #include "../math/quat.h"
 
-
-struct AmbientLight{
-    Color color{0.004f, 0.004f, 0.007f};
-};
-
 struct Light {
     Color color{White};
     vec3 position_or_direction{};
     f32 intensity = 1.0f;
     bool is_directional = false;
-
-//    Light(vec3 position_or_direction = 0.0f, Color color = White, f32 intensity = 1.0f, bool is_directional = false) :
-//            position_or_direction{position_or_direction},
-//            color{color},
-//            intensity{intensity},
-//            is_directional{is_directional}
-//    {}
 };
 
 INLINE_XPU f32 ggxTrowbridgeReitz_D(f32 roughness, f32 NdotH) { // NDF
@@ -114,4 +102,3 @@ struct Material {
     INLINE_XPU bool hasAlbedoMap() const { return texture_count && (flags & MATERIAL_HAS_ALBEDO_MAP); }
     INLINE_XPU bool hasNormalMap() const { return texture_count && (flags & MATERIAL_HAS_NORMAL_MAP); }
 };
-

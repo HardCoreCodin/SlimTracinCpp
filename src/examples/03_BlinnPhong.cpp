@@ -2,7 +2,7 @@
 #include "../slim/draw/hud.h"
 #include "../slim/draw/bvh.h"
 #include "../slim/draw/selection.h"
-#include "../slim/renderer/ray_tracer.h"
+#include "../slim/renderer/renderer.h"
 #include "../slim/app.h"
 
 
@@ -48,9 +48,9 @@ struct ExampleApp : SlimApp {
     Material Lambert{1.0f,0.7f,0,0, {},
                      BRDF_Lambert, 1.0f, 0.25f};
     Material Phong{1.0f,0.5f,MATERIAL_HAS_NORMAL_MAP,2, {0, 1},
-                   BRDF_Phong, 0.5f, 0.25f, 0.0f, 1.0f, {1.0f, 1.0f, 0.4f}};
+                   BRDF_Phong, 0.75f, 0.25f, 0.0f, 1.0f, {1.0f, 1.0f, 0.4f}};
     Material Blinn{{1.0f, 0.3f, 1.0f},0.5f,MATERIAL_HAS_NORMAL_MAP,2, {0, 1},
-                   BRDF_Blinn, 0.5f, 0.25f, 0.0f, 1.0f, {1.0f, 0.4f, 1.0f}};
+                   BRDF_Blinn, 0.75f, 0.25f, 0.0f, 1.0f, {1.0f, 0.4f, 1.0f}};
     Material *materials{&floor_material};
 
     Geometry floor {{{},{       },{40, 1, 40}},GeometryType_Quad,  MATERIAL_FLOOR};
@@ -70,7 +70,7 @@ struct ExampleApp : SlimApp {
                 geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 
-    RayTracer ray_tracer{scene};
+    RayTracingRenderer renderer{scene};
 
     void OnUpdate(f32 delta_time) override {
         i32 fps = (i32)render_timer.average_frames_per_second;
@@ -110,7 +110,7 @@ struct ExampleApp : SlimApp {
     }
 
     void OnRender() override {
-        ray_tracer.render(viewport, true, use_gpu);
+        renderer.render(viewport, true, use_gpu);
         if (draw_BVH) {
             for (u32 i = 0; i < scene.counts.geometries; i++)
                 if (geometries[i].type == GeometryType_Mesh)
@@ -128,12 +128,12 @@ struct ExampleApp : SlimApp {
             if (key == 'A' && controls::is_pressed::shift) { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
             if (key == 'G') use_gpu = !use_gpu;
             if (key == 'B') draw_BVH = !draw_BVH;
-            if (key == '1') ray_tracer.settings.render_mode = RenderMode_Beauty;
-            if (key == '2') ray_tracer.settings.render_mode = RenderMode_Depth;
-            if (key == '3') ray_tracer.settings.render_mode = RenderMode_Normals;
-            if (key == '4') ray_tracer.settings.render_mode = RenderMode_NormalMap;
-            if (key == '5') ray_tracer.settings.render_mode = RenderMode_MipLevel;
-            if (key == '6') ray_tracer.settings.render_mode = RenderMode_UVs;
+            if (key == '1') renderer.settings.render_mode = RenderMode_Beauty;
+            if (key == '2') renderer.settings.render_mode = RenderMode_Depth;
+            if (key == '3') renderer.settings.render_mode = RenderMode_Normals;
+            if (key == '4') renderer.settings.render_mode = RenderMode_NormalMap;
+            if (key == '5') renderer.settings.render_mode = RenderMode_MipLevel;
+            if (key == '6') renderer.settings.render_mode = RenderMode_UVs;
             if ((key == 'Z' || key == 'X') && selection.geometry) {
                 Geometry &geo = *selection.geometry;
                 char inc = key == 'X' ? 1 : -1;
@@ -143,11 +143,11 @@ struct ExampleApp : SlimApp {
                 } else if (selection.geometry != &floor)
                     geo.material_id = ((geo.material_id + inc + MATERIAL_COUNT - 2) % (MATERIAL_COUNT - 1)) + 1;
 
-                ray_tracer.uploadMaterials();
+                uploadMaterials(scene);
                 updateSelectionInHUD();
             }
             const char* mode;
-            switch ( ray_tracer.settings.render_mode) {
+            switch ( renderer.settings.render_mode) {
                 case RenderMode_Beauty:    mode = "Beauty"; break;
                 case RenderMode_Depth:     mode = "Depth"; break;
                 case RenderMode_Normals:   mode = "Normals"; break;

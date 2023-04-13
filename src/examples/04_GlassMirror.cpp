@@ -2,7 +2,7 @@
 #include "../slim/draw/hud.h"
 #include "../slim/draw/bvh.h"
 #include "../slim/draw/selection.h"
-#include "../slim/renderer/ray_tracer.h"
+#include "../slim/renderer/renderer.h"
 #include "../slim/app.h"
 
 
@@ -57,7 +57,7 @@ struct ExampleApp : SlimApp {
         IOR_AIR, F0_Aluminium
     };
     Material Glass {
-        0.1f,0.25f,
+        0.05f,0.25f,
         MATERIAL_IS_REFRACTIVE |
               MATERIAL_HAS_NORMAL_MAP,
         2,{0, 1},
@@ -69,8 +69,8 @@ struct ExampleApp : SlimApp {
     OrientationUsingQuaternion wall_rot{75 * DEG_TO_RAD, 0, 90.0f * DEG_TO_RAD};
     Geometry floor {{{},{       },{40, 1, 40}},GeometryType_Quad,  MATERIAL_FLOOR};
     Geometry wall  {{wall_rot, {-6, 8, 15}, {6, 1, 10}}, GeometryType_Quad, MATERIAL_MIRROR};
-    Geometry box{   {{},{-9, 8, -2},{2, 2, 3}},GeometryType_Box,   MATERIAL_GLASS, 0, GEOMETRY_IS_VISIBLE};
-    Geometry tet{   {{},{-3, 5, -3},{4, 3, 4}},GeometryType_Tet,   MATERIAL_GLASS, 0, GEOMETRY_IS_VISIBLE};
+    Geometry box{   {{},{-9, 8, -2},{2, 2, 3}},GeometryType_Box,   MATERIAL_MIRROR};
+    Geometry tet{   {{},{-3, 5, -3},{4, 3, 4}},GeometryType_Tet,   MATERIAL_MIRROR};
     Geometry sphere{{{},{ 3, 7, 2  },{4, 3, 3}},GeometryType_Sphere,MATERIAL_GLASS, 0, GEOMETRY_IS_VISIBLE};
     Geometry *geometries{&floor};
 
@@ -85,13 +85,13 @@ struct ExampleApp : SlimApp {
                 geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 
-    RayTracer ray_tracer{scene};
+    RayTracingRenderer renderer{scene};
 
     void OnUpdate(f32 delta_time) override {
         i32 fps = (i32)render_timer.average_frames_per_second;
         FPS.value = fps;
         FPS.value_color = fps >= 60 ? Green : (fps >= 24 ? Cyan : (fps < 12 ? Red : Yellow));
-        Bounces.value = (i32)ray_tracer.settings.max_depth;
+        Bounces.value = (i32)renderer.settings.max_depth;
 
         if (!mouse::is_captured) selection.manipulate(viewport, scene);
         if (selection.changed) updateSelectionInHUD();
@@ -124,7 +124,7 @@ struct ExampleApp : SlimApp {
     }
 
     void OnRender() override {
-        ray_tracer.render(viewport, true, use_gpu);
+        renderer.render(viewport, true, use_gpu);
         if (draw_BVH) {
             for (u32 i = 0; i < scene.counts.geometries; i++)
                 if (geometries[i].type == GeometryType_Mesh)
@@ -142,29 +142,29 @@ struct ExampleApp : SlimApp {
             if (key == 'A' && controls::is_pressed::shift) { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
             if (key == 'G') use_gpu = !use_gpu;
             if (key == 'B') draw_BVH = !draw_BVH;
-            if (key == '1') ray_tracer.settings.render_mode = RenderMode_Beauty;
-            if (key == '2') ray_tracer.settings.render_mode = RenderMode_Depth;
-            if (key == '3') ray_tracer.settings.render_mode = RenderMode_Normals;
-            if (key == '4') ray_tracer.settings.render_mode = RenderMode_NormalMap;
-            if (key == '5') ray_tracer.settings.render_mode = RenderMode_MipLevel;
-            if (key == '6') ray_tracer.settings.render_mode = RenderMode_UVs;
+            if (key == '1') renderer.settings.render_mode = RenderMode_Beauty;
+            if (key == '2') renderer.settings.render_mode = RenderMode_Depth;
+            if (key == '3') renderer.settings.render_mode = RenderMode_Normals;
+            if (key == '4') renderer.settings.render_mode = RenderMode_NormalMap;
+            if (key == '5') renderer.settings.render_mode = RenderMode_MipLevel;
+            if (key == '6') renderer.settings.render_mode = RenderMode_UVs;
             if ((key == 'Z' || key == 'X')) {
                 char inc = key == 'X' ? 1 : -1;
                 if (controls::is_pressed::ctrl) {
-                    ray_tracer.settings.max_depth += inc;
-                    if (ray_tracer.settings.max_depth == 0) ray_tracer.settings.max_depth = 10;
-                    if (ray_tracer.settings.max_depth == 11) ray_tracer.settings.max_depth = 1;
+                    renderer.settings.max_depth += inc;
+                    if (renderer.settings.max_depth == 0) renderer.settings.max_depth = 10;
+                    if (renderer.settings.max_depth == 11) renderer.settings.max_depth = 1;
                 } else if (selection.geometry && selection.geometry != &floor) {
                     Geometry &geo = *selection.geometry;
                     geo.material_id = ((geo.material_id + inc + MATERIAL_COUNT - 2) % (MATERIAL_COUNT - 1)) + 1;
                     geo.flags = GEOMETRY_IS_VISIBLE;
                     if (geo.material_id != MATERIAL_GLASS) geo.flags |= GEOMETRY_IS_SHADOWING;
-                    ray_tracer.uploadMaterials();
+                    uploadMaterials(scene);
                     updateSelectionInHUD();
                 }
             }
             const char* mode;
-            switch ( ray_tracer.settings.render_mode) {
+            switch ( renderer.settings.render_mode) {
                 case RenderMode_Beauty:    mode = "Beauty"; break;
                 case RenderMode_Depth:     mode = "Depth"; break;
                 case RenderMode_Normals:   mode = "Normals"; break;

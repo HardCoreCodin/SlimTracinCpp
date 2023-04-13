@@ -2,7 +2,7 @@
 #include "../slim/draw/hud.h"
 #include "../slim/draw/bvh.h"
 #include "../slim/draw/selection.h"
-#include "../slim/renderer/ray_tracer.h"
+#include "../slim/renderer/renderer.h"
 #include "../slim/app.h"
 
 
@@ -28,14 +28,15 @@ struct ExampleApp : SlimApp {
     HUD hud{{9}, &FPS};
 
     // Viewport:
-    Camera camera{{-40 * DEG_TO_RAD, 0, 0}, {1, 50, -50}}, *cameras{&camera};
+    Camera camera{{-25 * DEG_TO_RAD, 0, 0}, {0, 7, -11}}, *cameras{&camera};
     Canvas canvas;
     Viewport viewport{canvas, &camera};
 
     // Scene:
-    Light key_light{ {1.0f, 1.0f, 0.65f}, {25, 15, -15}, 1.1f * 200.0f};
-    Light fill_light{{0.65f, 0.65f, 1.0f}, {-25, 15, -15}, 1.2f * 200.0f };
-    Light rim_light{ {1.0f, 0.25f, 0.25f}, {0, 15, 15}, 0.9f * 200.0f};
+    Light key_light{ {1.0f, 1.0f, 0.65f}, {8, 10, -5}, 1.1f * 40.0f};
+    Light fill_light{{0.65f, 0.65f, 1.0f}, {-8, 10, -5}, 1.2f * 40.0f };
+    Light rim_light{ {1.0f, 0.25f, 0.25f}, {6, 5, 2}, 0.9f * 40.0f};
+    Light aux_light{ {0.25f, 1.0f, 0.25f}, {-2, 4, 2}, 0.9f * 20.0f};
     Light *lights{&key_light};
 
     enum MATERIAL {
@@ -76,21 +77,21 @@ struct ExampleApp : SlimApp {
         IOR_AIR, F0_Aluminium
     };
     Material Glass {
-        0.1f,0.25f,
+        0.05f,0.25f,
         MATERIAL_IS_REFRACTIVE,
         0,{},
         BRDF_CookTorrance, 1.0f, 1.0f, 0.0f,
         IOR_GLASS, F0_Glass_Low
     };
     Material *materials{&floor_material};
-
+    OrientationUsingQuaternion rot{0, -45 * DEG_TO_RAD, 0};
     Geometry floor {{{},{}, {40, 1, 40}},GeometryType_Quad};
-    Geometry box   {{{},{-20, 12, 0}},   GeometryType_Box, MATERIAL_SHAPE};
-    Geometry tet   {{{},{0, 16, 32}},    GeometryType_Tet, MATERIAL_PHONG};
-    Geometry sphere{{{},{-16, 4.8f, 32}},GeometryType_Sphere,MATERIAL_BLINN};
-    Geometry monkey{{{},{24, 12, 0}},    GeometryType_Mesh,MATERIAL_MIRROR, 0};
-    Geometry dragon{{{},{4, 12, -20}},   GeometryType_Mesh,MATERIAL_GLASS, 1, GEOMETRY_IS_VISIBLE};
-    Geometry dog   {{{},{16, 12, 24}},    GeometryType_Mesh,MATERIAL_DOG, 2};
+    Geometry sphere1{{{},{4, 1, -4}},GeometryType_Sphere,MATERIAL_MIRROR};
+    Geometry sphere2{{{},aux_light.position_or_direction},
+                     GeometryType_Sphere,MATERIAL_PHONG, 0, GEOMETRY_IS_SHADOWING | GEOMETRY_IS_TRANSPARENT | GEOMETRY_IS_VISIBLE};
+    Geometry monkey{{rot,{6, 4.5, 2}, 0.4f},    GeometryType_Mesh,MATERIAL_GLASS, 0, GEOMETRY_IS_VISIBLE};
+    Geometry dragon{{{},{-2, 2, -3}},   GeometryType_Mesh,MATERIAL_PHONG, 1};
+    Geometry dog   {{rot,{4, 2.1f, 3}, 0.8f},    GeometryType_Mesh,MATERIAL_DOG, 2};
     Geometry *geometries{&floor};
 
     Texture textures[4];
@@ -110,42 +111,29 @@ struct ExampleApp : SlimApp {
         String::getFilePath("dog.mesh"   ,strings[2],__FILE__)
     };
 
-    Scene scene{{7,1,3,MATERIAL_COUNT,4,3},
+    Scene scene{{6,1,4,MATERIAL_COUNT,4,3},
                 geometries, cameras, lights, materials, textures, texture_files, meshes, mesh_files};
     Selection selection;
 
-    RayTracer ray_tracer{scene};
+    RayTracingRenderer renderer{scene};
 
     void OnUpdate(f32 delta_time) override {
         i32 fps = (i32)render_timer.average_frames_per_second;
         FPS.value = fps;
         FPS.value_color = fps >= 60 ? Green : (fps >= 24 ? Cyan : (fps < 12 ? Red : Yellow));
-        Bounces.value = (i32)ray_tracer.settings.max_depth;
+        Bounces.value = (i32)renderer.settings.max_depth;
 
         if (!mouse::is_captured) selection.manipulate(viewport, scene);
         if (selection.changed) updateSelectionInHUD();
         if (!controls::is_pressed::alt) viewport.updateNavigation(delta_time);
 
-        static float elapsed = 0;
-        elapsed += delta_time;
-        f32 dog_scale    = sinf(elapsed * 1.5f) * 0.02f;
-        f32 monkey_scale = sinf(elapsed * 2.5f + 1) * 0.05f;
-
-        dog.transform.scale = 4.0f + dog_scale;
-        dog.transform.scale.y += 2.0f * dog_scale;
-        dragon.transform.scale = 5.0f;
-        monkey.transform.scale = 3.0f + monkey_scale;
-        monkey.transform.scale.y -= 2.0f * monkey_scale;
-        sphere.transform.scale = tet.transform.scale = box.transform.scale = 4.0f;
-
-        quat rot = quat::RotationAroundY(delta_time * 0.125f);
-        rot = rot.normalized();
-        if (!(controls::is_pressed::alt && selection.geometry == &monkey))
-            monkey.transform.orientation *= rot;
-
-        rot.amount = -rot.amount;
-        if (!(controls::is_pressed::alt && selection.geometry == &dog))
-            dog.transform.orientation *= rot;
+        quat rot = quat::RotationAroundY(delta_time * 0.25f);
+        for (u32 i = 1; i < scene.counts.geometries; i++) {
+            Geometry &geo{geometries[i]};
+            rot.amount = -rot.amount;
+            if (!(controls::is_pressed::alt && selection.geometry == &geo))
+                geo.transform.orientation *= rot;
+        }
     }
 
     void updateSelectionInHUD() {
@@ -173,7 +161,7 @@ struct ExampleApp : SlimApp {
     }
 
     void OnRender() override {
-        ray_tracer.render(viewport, true, use_gpu);
+        renderer.render(viewport, true, use_gpu);
         if (draw_BVH) {
             for (u32 i = 0; i < scene.counts.geometries; i++)
                 if (geometries[i].type == GeometryType_Mesh)
@@ -188,15 +176,15 @@ struct ExampleApp : SlimApp {
     void OnKeyChanged(u8 key, bool is_pressed) override {
         if (is_pressed) {
             if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
-            if (key == 'A' && controls::is_pressed::shift) { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
+            if (key == 'V') { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
             if (key == 'G') use_gpu = !use_gpu;
             if (key == 'B') draw_BVH = !draw_BVH;
-            if (key == '1') ray_tracer.settings.render_mode = RenderMode_Beauty;
-            if (key == '2') ray_tracer.settings.render_mode = RenderMode_Depth;
-            if (key == '3') ray_tracer.settings.render_mode = RenderMode_Normals;
-            if (key == '4') ray_tracer.settings.render_mode = RenderMode_NormalMap;
-            if (key == '5') ray_tracer.settings.render_mode = RenderMode_MipLevel;
-            if (key == '6') ray_tracer.settings.render_mode = RenderMode_UVs;
+            if (key == '1') renderer.settings.render_mode = RenderMode_Beauty;
+            if (key == '2') renderer.settings.render_mode = RenderMode_Depth;
+            if (key == '3') renderer.settings.render_mode = RenderMode_Normals;
+            if (key == '4') renderer.settings.render_mode = RenderMode_NormalMap;
+            if (key == '5') renderer.settings.render_mode = RenderMode_MipLevel;
+            if (key == '6') renderer.settings.render_mode = RenderMode_UVs;
             if (selection.geometry &&
                 selection.geometry != &floor &&
                 (key == 'Z' || key == 'X' || key == 'C')) {
@@ -213,9 +201,9 @@ struct ExampleApp : SlimApp {
                 } else if (selection.geometry != &dog) {
                     char inc = key == 'X' ? 1 : -1;
                     if (controls::is_pressed::shift) {
-                        ray_tracer.settings.max_depth += inc;
-                        if (ray_tracer.settings.max_depth == 0) ray_tracer.settings.max_depth = 10;
-                        if (ray_tracer.settings.max_depth == 11) ray_tracer.settings.max_depth = 1;
+                        renderer.settings.max_depth += inc;
+                        if (renderer.settings.max_depth == 0) renderer.settings.max_depth = 10;
+                        if (renderer.settings.max_depth == 11) renderer.settings.max_depth = 1;
                     } else if (controls::is_pressed::ctrl) {
                         Material &M = scene.materials[geo.material_id];
                         M.roughness = clampedValue(M.roughness + (f32)inc * 0.01f, 0.05f, 1.0f);
@@ -228,12 +216,12 @@ struct ExampleApp : SlimApp {
                             geo.flags |= GEOMETRY_IS_SHADOWING;
                     }
                     updateSelectionInHUD();
-                    ray_tracer.uploadMaterials();
+                    uploadMaterials(scene);
                 }
             }
 
             const char* mode;
-            switch ( ray_tracer.settings.render_mode) {
+            switch ( renderer.settings.render_mode) {
                 case RenderMode_Beauty:    mode = "Beauty"; break;
                 case RenderMode_Depth:     mode = "Depth"; break;
                 case RenderMode_Normals:   mode = "Normals"; break;

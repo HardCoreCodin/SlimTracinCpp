@@ -143,5 +143,5 @@ Holding the `middle mouse button` and dragging the mouse scales the object.<br>
 In some examples, further interaction is enabled while holding `ctrl` or `shift` <br>
 using the `mouse wheel` as a virtual "slider":<br>
 Holding `shift` and scrolling the `mouse wheel` cycles the assigned material for the selected object.<br>
-Holding `ctrl` and scrolling the `mouse wheel` increases or decreases the trace-height*<br>
+Holding `ctrl` and scrolling the `mouse wheel` increases or decreases the ray_tracer-height*<br>
 <i>(how many times rays are allowed to bounce around between reflective or refractive objects)</i><br>
