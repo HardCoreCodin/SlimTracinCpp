@@ -34,18 +34,22 @@ INLINE_XPU vec3 sampleNormal(Material &material, const RayHit &hit, const Textur
 struct SurfaceShader {
     Geometry *geometry = nullptr;
     Material *material = nullptr;
-
-    Color F, albedo_from_map;
+    Color F, albedo_from_map, Fs, Fd;
     vec3 P, N, V, L, R, RF, H, emissive_quad_vertices[4];
     f32 Ld, Ld2, NdotL, NdotV, NdotH, HdotL, IOR;
 
     bool refracted = false;
 
     INLINE_XPU void shadeFromLight(const Light &light, const Scene &scene, SceneTracer &tracer, Color &color) {
-        if (isFacingLight(light) &&
-            !tracer.inShadow(scene, P, L, Ld))
+        if (isFacingLight(light) && (
+                !(light.flags & Light_IsShadowing) ||
+                !tracer.inShadow(scene, P, L, Ld)
+            )
+        ) {
             // color += fr(p, L, V) * Li(p, L) * cos(w)
-            color = radianceFraction().mulAdd(light.color * (NdotL * light.intensity / Ld2), color);
+            radianceFraction();
+            color = (Fs + Fd).mulAdd(light.color * (NdotL * light.intensity / Ld2), color);
+        }
     }
 
     INLINE_XPU void prepareForShading(Ray &ray, RayHit &hit, Material *materials, const Texture *textures) {
@@ -73,10 +77,11 @@ struct SurfaceShader {
         }
     }
 
-    INLINE_XPU Color radianceFraction() {
-        Color radiance_fraction{material->albedo * albedo_from_map};
+    INLINE_XPU void radianceFraction() {
+        Fs = Black;
+        Fd = material->albedo * albedo_from_map;
         if (material->brdf == BRDF_CookTorrance) {
-            radiance_fraction *= (1.0f - material->metalness) * ONE_OVER_PI;
+            Fd *= (1.0f - material->metalness) * ONE_OVER_PI;
 
             if (NdotV > 0.0f) { // TODO: This should not be necessary to check for, because rays would miss in that scenario so the code should never even get to this point - and yet it seems like it does.
                 // If the viewing direction is perpendicular to the normal, no light can reflect
@@ -88,12 +93,12 @@ struct SurfaceShader {
                     H = (L + V).normalized();
                     NdotH = clampedValue(N.dot(H));
                     HdotL = clampedValue(H.dot(L));
-                    Color Fs = cookTorrance(material->roughness, NdotL, NdotV, HdotL, NdotH, material->reflectivity, F);
-                    radiance_fraction = radiance_fraction.mulAdd(1.0f - F, Fs);
+                    Fs = cookTorrance(material->roughness, NdotL, NdotV, HdotL, NdotH, material->reflectivity, F);
+                    Fd *= 1.0f - F;
                 }
             }
         } else {
-            radiance_fraction *= material->roughness * ONE_OVER_PI;
+            Fd *= material->roughness * ONE_OVER_PI;
 
             if (material->brdf != BRDF_Lambert) {
                 f32 specular_factor, exponent;
@@ -105,18 +110,15 @@ struct SurfaceShader {
                     specular_factor = clampedValue(N.dot((L + V).normalized()));;
                 }
                 if (specular_factor > 0.0f)
-                    radiance_fraction = material->reflectivity.scaleAdd(
-                            powf(specular_factor, exponent) * (1.0f - material->roughness),
-                            radiance_fraction);
+                    Fs = material->reflectivity * (powf(specular_factor, exponent) * (1.0f - material->roughness));
             }
         }
-
-        return radiance_fraction;
     }
 
     INLINE_XPU bool isFacingLight(const Light &light) {
-        if (light.is_directional) {
-            Ld = Ld2 = INFINITY;
+        if (light.flags & Light_IsDirectional) {
+            Ld = INFINITY;
+            Ld2 = 1.0f;
             L = -light.position_or_direction;
         } else {
             L = light.position_or_direction - P;
@@ -199,8 +201,10 @@ struct SurfaceShader {
                     shaded_light = Min(shaded_light, d);
                 }
 
-                if (shaded_light > 0.0f)
-                    color = radianceFraction().mulAdd(scene.materials[emissive_quad->material_id].emission * (emission_intensity * shaded_light * 7.0f), color);
+                if (shaded_light > 0.0f) {
+                    radianceFraction();
+                    color = (Fd + Fs).mulAdd(scene.materials[emissive_quad->material_id].emission * (emission_intensity * shaded_light * 7.0f), color);
+                }
             }
         }
 

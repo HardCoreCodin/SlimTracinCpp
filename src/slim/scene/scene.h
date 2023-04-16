@@ -256,7 +256,7 @@ struct Scene : SceneData {
         if (lights) {
             for (u32 i = 0; i < counts.lights; i++) {
                 Light &light = lights[i];
-                if (light.is_directional)
+                if (light.flags & Light_IsDirectional)
                     continue;
 
                 f32 light_radius = light.intensity * (1.0f / (8.0f * 16.0f));

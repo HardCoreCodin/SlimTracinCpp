@@ -1,3 +1,5 @@
+#include "./textures.h"
+
 #include "../slim/scene/selection.h"
 #include "../slim/draw/bvh.h"
 #include "../slim/draw/hud.h"
@@ -15,10 +17,11 @@
 
 
 struct ExampleApp : SlimApp {
-    bool draw_BVH = false;
-    bool antialias = false;
-    bool cutout = false;
     bool use_gpu = USE_GPU_BY_DEFAULT;
+    bool antialias = false;
+    bool skybox_swapped = false;
+    bool draw_BVH = false;
+    bool cutout = false;
 
     // HUD:
     HUDLine FPS {"FPS : "};
@@ -33,18 +36,22 @@ struct ExampleApp : SlimApp {
     Viewport viewport{canvas, &camera};
 
     // Scene:
-    Light light1{White,{+10, +10, -10}, 300};
-    Light light2{White,{-10, +10, -10}, 300};
-    Light light3{White,{+10, -20, -10}, 300};
-    Light light4{White,{-10, -20, -10}, 300};
+    Light light1{White,{+10, +10, -10}, 200};
+    Light light2{White,{-10, +10, -10}, 200};
+    Light light3{White,{+10, -20, -10}, 200};
+    Light light4{White,{-10, -20, -10}, 200};
     Light *lights{&light1};
 
     Material materials[GRID_SIZE][GRID_SIZE];
     Geometry geometries[GRID_SIZE][GRID_SIZE];
-    SceneCounts counts{OBJECT_COUNT, 1, 4, OBJECT_COUNT};
-    Scene scene{counts, &geometries[0][0], &camera, lights, &materials[0][0]};
+    SceneCounts counts{OBJECT_COUNT, 1, 4, OBJECT_COUNT, TextureCount};
+    Scene scene{counts, &geometries[0][0], &camera, lights, &materials[0][0], textures, texture_files};
     Selection selection;
-    RayTracingRenderer renderer{scene};
+    RayTracingRenderer renderer{scene,
+                                1,
+                                Cathedral_SkyboxColor,
+                                Cathedral_SkyboxRadiance,
+                                Cathedral_SkyboxIrradiance};
 
     ExampleApp() {
         Color plastic{0.04f};
@@ -86,10 +93,21 @@ struct ExampleApp : SlimApp {
     void OnKeyChanged(u8 key, bool is_pressed) override {
         if (!is_pressed) {
             if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
-            if (key == 'A' && controls::is_pressed::shift) { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
-            if (key == 'G') use_gpu = !use_gpu;
+            if (key == 'G' && USE_GPU_BY_DEFAULT) use_gpu = !use_gpu;
             if (key == 'B') draw_BVH = !draw_BVH;
+            if (key == 'V') {
+                antialias = !antialias;
+                canvas.antialias = antialias ? SSAA : NoAA;
+            }
+            if (key == 'M') {
+                skybox_swapped = !skybox_swapped;
+                char inc = skybox_swapped ? 3 : -3;
+                renderer.settings.skybox_color_texture_id += inc;
+                renderer.settings.skybox_radiance_texture_id += inc;
+                renderer.settings.skybox_irradiance_texture_id += inc;
+            }
         }
+
         Move &move = viewport.navigation.move;
         Turn &turn = viewport.navigation.turn;
         if (key == 'Q') turn.left     = is_pressed;

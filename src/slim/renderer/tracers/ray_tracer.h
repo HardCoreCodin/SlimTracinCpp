@@ -9,7 +9,13 @@
 
 
 struct RayTracerSettings {
-    u32 max_depth;
+    u8 max_depth;
+    char skybox_color_texture_id;
+    char skybox_radiance_texture_id;
+    char skybox_irradiance_texture_id;
+    f32 skybox_color_intensity;
+    f32 skybox_radiance_intensity;
+    f32 skybox_irradiance_intensity;
     RenderMode render_mode;
     ColorID mip_level_colors[9];
 };
@@ -62,6 +68,7 @@ struct RayTracer {
 
     INLINE_XPU void renderPixel(const Scene &scene, const RayTracerSettings &settings, const RayTracerProjection &projection, vec3 &direction, Color &color) {
         color = Black;
+
         z_depth = INFINITY;
 
         ray.reset(projection.camera_position, direction.normalized());
@@ -79,7 +86,7 @@ struct RayTracer {
             z_depth = projection.getDepthAt(hit.position);
             if (render_beauty) {
                 if (!hit.from_behind && surface.material->isEmissive()) color = surface.material->emission;
-                else if (scene.lights) shadePixel(scene, settings, color);
+                else shadePixel(scene, settings, color);
             } else
                 switch (settings.render_mode) {
                     case RenderMode_UVs      : color = getColorByUV(hit.uv); break;
@@ -91,20 +98,35 @@ struct RayTracer {
                 }
         }
         if (render_beauty) {
-            hit_found = hit_found || lights_shader.shadeLights(scene.lights, scene.counts.lights,
-                                                               projection.camera_position, ray.direction,
-                                                               INFINITY, color);
-            if (hit_found) color.applyToneMapping();
+            if (!hit_found) {
+                if (settings.skybox_color_texture_id >= 0)
+                    color = scene.textures[settings.skybox_color_texture_id].sampleCube(
+                        ray.direction.x,
+                        ray.direction.y,
+                        ray.direction.z
+                    ).color * settings.skybox_color_intensity;
+
+                lights_shader.shadeLights(scene.lights, scene.counts.lights,
+                                          projection.camera_position, ray.direction,
+                                          INFINITY, color);
+            }
+            if (color.r != 0.0f ||
+                color.g != 0.0f ||
+                color.b != 0.0f )
+                color.applyToneMapping();
         }
     }
 
-    INLINE_XPU void shadePixel(const Scene &scene, const RayTracerSettings &settings, Color &color) {
-//        f32 max_distance = hit.distance;
+    INLINE_XPU Color cubemapColor(const vec3 &direction, const Texture &texture) {
+        return texture.sampleCube(direction.x,direction.y,direction.z).color;
+    }
 
+    INLINE_XPU void shadePixel(const Scene &scene, const RayTracerSettings &settings, Color &color) {
         Color current_color;
         Color throughput = 1.0f;
         u32 depth_left = settings.max_depth;
         ray.depth = scene_tracer.shadow_ray.depth = scene_tracer.aux_ray.depth = 1;
+
         while (depth_left) {
             current_color = Black;
 
@@ -114,7 +136,16 @@ struct RayTracer {
             if (scene.flags & SCENE_HAD_EMISSIVE_QUADS &&
                 surface.geometry != (scene.geometries + 4))
                 surface.shadeFromEmissiveQuads(scene, scene_tracer.aux_ray, scene_tracer.aux_hit, current_color);
-//                max_distance = hit.distance;
+
+            if (settings.skybox_irradiance_texture_id >= 0 &&
+                settings.skybox_radiance_texture_id >= 0) {
+                surface.L = surface.N;
+                surface.NdotL = 1.0f;
+                Color D{cubemapColor(surface.N, scene.textures[settings.skybox_irradiance_texture_id])};
+                Color S{cubemapColor(surface.R, scene.textures[settings.skybox_radiance_texture_id])};
+                surface.radianceFraction();
+                current_color = D.mulAdd(surface.Fd, surface.Fs.mulAdd(S, current_color));
+            }
 
             color = current_color.mulAdd(throughput, color);
             if (scene.lights)
@@ -156,7 +187,8 @@ struct RayTracer {
                     }
 
                     continue;
-                }
+                } else if (settings.skybox_color_texture_id >= 0)
+                    color = cubemapColor(ray.direction, scene.textures[settings.skybox_color_texture_id]).mulAdd(throughput, color);
             }
 
             break;

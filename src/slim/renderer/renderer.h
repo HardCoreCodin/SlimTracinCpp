@@ -16,6 +16,7 @@ void uploadMaterials(const Scene &scene) {}
 void uploadSceneBVH(const Scene &scene) {}
 #endif
 
+#define RAY_TRACER_DEFAULT_SETTINGS_SKYBOX_TEXTURE_ID -1
 #define RAY_TRACER_DEFAULT_SETTINGS_MAX_DEPTH 3
 #define RAY_TRACER_DEFAULT_SETTINGS_RENDER_MODE RenderMode_Beauty
 
@@ -27,11 +28,23 @@ struct RayTracingRenderer {
     RayTracerProjection projection;
 
     explicit RayTracingRenderer(Scene &scene,
-                                u32 max_depth = RAY_TRACER_DEFAULT_SETTINGS_MAX_DEPTH,
+                                u8 max_depth = RAY_TRACER_DEFAULT_SETTINGS_MAX_DEPTH,
+                                char skybox_color_texture_id = -1,
+                                char skybox_radiance_texture_id = -1,
+                                char skybox_irradiance_texture_id = -1,
+                                f32 skybox_color_intensity = 1.0f,
+                                f32 skybox_radiance_intensity = 1.0f,
+                                f32 skybox_irradiance_intensity = 1.0f,
                                 RenderMode render_mode = RAY_TRACER_DEFAULT_SETTINGS_RENDER_MODE,
                                 memory::MonotonicAllocator *memory_allocator = nullptr) :
               scene{scene}, ray_tracer{scene.counts.geometries, scene.mesh_stack_size, memory_allocator} {
 
+        settings.skybox_color_texture_id = skybox_color_texture_id;
+        settings.skybox_radiance_texture_id = skybox_radiance_texture_id;
+        settings.skybox_irradiance_texture_id = skybox_irradiance_texture_id;
+        settings.skybox_color_intensity = skybox_color_intensity;
+        settings.skybox_radiance_intensity = skybox_radiance_intensity;
+        settings.skybox_irradiance_intensity = skybox_irradiance_intensity;
         settings.max_depth = max_depth;
         settings.render_mode = render_mode;
         settings.mip_level_colors[0] = BrightRed;

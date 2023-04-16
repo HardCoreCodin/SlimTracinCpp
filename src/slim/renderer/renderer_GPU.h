@@ -7,7 +7,7 @@
 #define USE_GPU_BY_DEFAULT true
 #define MESH_BVH_STACK_SIZE 16
 #define SCENE_BVH_STACK_SIZE 6
-#define SLIM_THREADS_PER_BLOCK 32
+#define SLIM_THREADS_PER_BLOCK 64
 
 __constant__ SceneData d_scene;
 __constant__ CanvasData d_canvas;
@@ -154,7 +154,7 @@ void initDataOnGPU(const Scene &scene) {
             total_mip_count += texture->mip_count;
             TextureMip *mip = texture->mips;
             for (u32 m = 0; m < texture->mip_count; m++, mip++)
-                total_texel_quads_count += texture->width * mip->height;
+                total_texel_quads_count += (mip->width + 1) * (mip->height + 1);
         }
         gpuErrchk(cudaMalloc(&t_scene.textures, sizeof(Texture)    * scene.counts.textures))
         gpuErrchk(cudaMalloc(&d_texture_mips,   sizeof(TextureMip) * total_mip_count))
@@ -173,7 +173,7 @@ void initDataOnGPU(const Scene &scene) {
 
             for (u32 m = 0; m < texture->mip_count; m++) {
                 TextureMip mip = texture->mips[m];
-                u32 quad_count = mip.width * mip.height;
+                u32 quad_count = (mip.width + 1) * (mip.height + 1);
                 uploadN( mip.texel_quads, d_quads, quad_count)
 
                 mip.texel_quads = d_quads;

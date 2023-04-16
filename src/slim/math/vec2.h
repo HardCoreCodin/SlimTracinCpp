@@ -773,65 +773,10 @@ struct UV : vec2 {
     }
 
     INLINE_XPU void setByBoxSide(BoxSide side, f32 X, f32 Y, f32 Z) {
-        switch (side) {
-            case BoxSide_Top: {
-                u = X;
-                v = Z;
-            }
-                break;
-            case BoxSide_Bottom: {
-                u = -X;
-                v = -Z;
-            }
-                break;
-            case BoxSide_Left: {
-                u = -Z;
-                v = Y;
-            }
-                break;
-            case BoxSide_Right: {
-                u = Z;
-                v = Y;
-            }
-                break;
-            case BoxSide_Front: {
-                u = X;
-                v = Y;
-            }
-                break;
-            default: {
-                u = -X;
-                v = Y;
-            }
-                break;
-        }
-        shiftToNormalized();
+        setUVByBoxSide(side, X, Y, Z, &u, &v);
     }
 
-    INLINE_XPU void setBySphere(f32 X, f32 Y, f32 Z) {
-        f32 z_over_x = X ? (Z / X) : 2;
-        f32 y_over_x = X ? (Y / X) : 2;
-        if (z_over_x <=  1 &&
-            z_over_x >= -1 &&
-            y_over_x <=  1 &&
-            y_over_x >= -1) { // Right or Left
-            u = z_over_x;
-            v = X > 0 ? y_over_x : -y_over_x;
-        } else {
-            f32 x_over_z = Z ? (X / Z) : 2;
-            f32 y_over_z = Z ? (Y / Z) : 2;
-            if (x_over_z <=  1 &&
-                x_over_z >= -1 &&
-                y_over_z <=  1 &&
-                y_over_z >= -1) { // Front or Back:
-                u = -x_over_z;
-                v = Z > 0 ? y_over_z : -y_over_z;
-            } else {
-                u = X / (Y > 0 ? Y : -Y);
-                v = Z / Y;
-            }
-        }
-
-        shiftToNormalized();
+    INLINE_XPU void setBySphere(f32 X, f32 Y, f32 Z, BoxSide *side = nullptr) {
+        setUVBySphere(X, Y, Z, &u, &v, side);
     }
 };

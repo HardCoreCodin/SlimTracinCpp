@@ -4,11 +4,18 @@
 #include "../math/vec3.h"
 #include "../math/quat.h"
 
+enum LightFlags {
+    Light_None,
+
+    Light_IsDirectional,
+    Light_IsShadowing,
+};
+
 struct Light {
     Color color{White};
     vec3 position_or_direction{};
     f32 intensity = 1.0f;
-    bool is_directional = false;
+    u8 flags = Light_IsShadowing;
 };
 
 INLINE_XPU f32 ggxTrowbridgeReitz_D(f32 roughness, f32 NdotH) { // NDF

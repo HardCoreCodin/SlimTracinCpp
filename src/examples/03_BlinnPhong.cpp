@@ -1,3 +1,5 @@
+#include "./textures.h"
+
 #include "../slim/scene/selection.h"
 #include "../slim/draw/hud.h"
 #include "../slim/draw/bvh.h"
@@ -10,9 +12,11 @@
 //#include "../slim.h"
 
 struct ExampleApp : SlimApp {
-    bool draw_BVH = false;
-    bool antialias = false;
     bool use_gpu = USE_GPU_BY_DEFAULT;
+    bool antialias = false;
+    bool skybox_swapped = false;
+    bool draw_BVH = false;
+    bool cutout = false;
 
     // HUD:
     HUDLine FPS {"FPS : "};
@@ -35,42 +39,42 @@ struct ExampleApp : SlimApp {
     Light rim_light{ {1.0f, 0.25f, 0.25f}, {5, 8, 15}, 0.9f * 200.0f};
     Light *lights{&key_light};
 
-    enum MATERIAL {
-        MATERIAL_FLOOR,
-        MATERIAL_LAMBERT,
-        MATERIAL_PHONG,
-        MATERIAL_BLINN,
-        MATERIAL_COUNT
+    enum MaterialID {
+        Floor_MaterialID,
+
+        Lambert_MaterialID,
+        Phong_MaterialID,
+        Blinn_MaterialID,
+
+        MaterialCount
     };
 
     u8 flags{MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
-    Material floor_material{0.8f, 0.2f, flags, 2, {0, 1}};
-    Material Lambert{1.0f,0.7f,0,0, {},
+    Material floor_material{0.8f, 0.2f, flags,
+                            2, {Floor_Albedo, Floor_Normal}};
+    Material lambert_material{1.0f,0.7f,0,0, {},
                      BRDF_Lambert, 1.0f, 0.25f};
-    Material Phong{1.0f,0.5f,MATERIAL_HAS_NORMAL_MAP,2, {0, 1},
+    Material phong_material{1.0f,0.5f,MATERIAL_HAS_NORMAL_MAP,2, {0, 1},
                    BRDF_Phong, 0.75f, 0.25f, 0.0f, 1.0f, {1.0f, 1.0f, 0.4f}};
-    Material Blinn{{1.0f, 0.3f, 1.0f},0.5f,MATERIAL_HAS_NORMAL_MAP,2, {0, 1},
+    Material blinn_material{{1.0f, 0.3f, 1.0f},0.5f,MATERIAL_HAS_NORMAL_MAP,2, {0, 1},
                    BRDF_Blinn, 0.75f, 0.25f, 0.0f, 1.0f, {1.0f, 0.4f, 1.0f}};
     Material *materials{&floor_material};
 
-    Geometry floor {{{},{       },{40, 1, 40}},GeometryType_Quad,  MATERIAL_FLOOR};
-    Geometry box{   {{},{-9, 8, -2},{2, 2, 3}},GeometryType_Box,   MATERIAL_LAMBERT};
-    Geometry tet{   {{},{-3, 6, 14},{4, 3, 4}},GeometryType_Tet,   MATERIAL_PHONG};
-    Geometry sphere{{{},{3, 6, 2  },{4, 3, 3}},GeometryType_Sphere,MATERIAL_BLINN};
+    Geometry floor {{{},{       },{40, 1, 40}},GeometryType_Quad,  Floor_MaterialID};
+    Geometry box{   {{},{-9, 8, -2},{2, 2, 3}},GeometryType_Box,   Lambert_MaterialID};
+    Geometry tet{   {{},{-3, 6, 14},{4, 3, 4}},GeometryType_Tet,   Phong_MaterialID};
+    Geometry sphere{{{},{3, 6, 2  },{4, 3, 3}},GeometryType_Sphere,Blinn_MaterialID};
     Geometry *geometries{&floor};
 
-    Texture textures[2];
-    char string_buffers[2][200]{};
-    String texture_files[2]{
-        String::getFilePath("floor_albedo.texture",string_buffers[0],__FILE__),
-        String::getFilePath("floor_normal.texture",string_buffers[1],__FILE__),
-    };
-
-    Scene scene{{4,1,3,MATERIAL_COUNT,2},
+    Scene scene{{4,1,3,MaterialCount,TextureCount},
                 geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 
-    RayTracingRenderer renderer{scene};
+    RayTracingRenderer renderer{scene,
+                                1,
+                                Cathedral_SkyboxColor,
+                                Cathedral_SkyboxRadiance,
+                                Cathedral_SkyboxIrradiance};
 
     void OnUpdate(f32 delta_time) override {
         i32 fps = (i32)render_timer.average_frames_per_second;
@@ -96,9 +100,9 @@ struct ExampleApp : SlimApp {
         if (selection.geometry) {
             Geometry &geo = *selection.geometry;
             switch (geo.material_id) {
-                case MATERIAL_BLINN: shader = "Blinn"; break;
-                case MATERIAL_PHONG: shader = "Phong"; break;
-                default:             shader = "Lambert"; break;
+                case Blinn_MaterialID: shader = "Blinn"; break;
+                case Phong_MaterialID: shader = "Phong"; break;
+                default:               shader = "Lambert"; break;
             }
             Roughness.value = materials[geo.material_id].roughness;
         } else
@@ -123,31 +127,29 @@ struct ExampleApp : SlimApp {
     }
 
     void OnKeyChanged(u8 key, bool is_pressed) override {
-        if (is_pressed) {
+        if (!is_pressed) {
             if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
-            if (key == 'A' && controls::is_pressed::shift) { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
-            if (key == 'G') use_gpu = !use_gpu;
+            if (key == 'G' && USE_GPU_BY_DEFAULT) use_gpu = !use_gpu;
             if (key == 'B') draw_BVH = !draw_BVH;
+            if (key == 'V') {
+                antialias = !antialias;
+                canvas.antialias = antialias ? SSAA : NoAA;
+            }
+            if (key == 'M') {
+                skybox_swapped = !skybox_swapped;
+                char inc = skybox_swapped ? 3 : -3;
+                renderer.settings.skybox_color_texture_id += inc;
+                renderer.settings.skybox_radiance_texture_id += inc;
+                renderer.settings.skybox_irradiance_texture_id += inc;
+            }
             if (key == '1') renderer.settings.render_mode = RenderMode_Beauty;
             if (key == '2') renderer.settings.render_mode = RenderMode_Depth;
             if (key == '3') renderer.settings.render_mode = RenderMode_Normals;
             if (key == '4') renderer.settings.render_mode = RenderMode_NormalMap;
             if (key == '5') renderer.settings.render_mode = RenderMode_MipLevel;
             if (key == '6') renderer.settings.render_mode = RenderMode_UVs;
-            if ((key == 'Z' || key == 'X') && selection.geometry) {
-                Geometry &geo = *selection.geometry;
-                char inc = key == 'X' ? 1 : -1;
-                if (controls::is_pressed::ctrl) {
-                    Material &M = scene.materials[geo.material_id];
-                    M.roughness = clampedValue(M.roughness + (f32)inc * 0.05f, 0.05f, 1.0f);
-                } else if (selection.geometry != &floor)
-                    geo.material_id = ((geo.material_id + inc + MATERIAL_COUNT - 2) % (MATERIAL_COUNT - 1)) + 1;
-
-                uploadMaterials(scene);
-                updateSelectionInHUD();
-            }
             const char* mode;
-            switch ( renderer.settings.render_mode) {
+            switch (renderer.settings.render_mode) {
                 case RenderMode_Beauty:    mode = "Beauty"; break;
                 case RenderMode_Depth:     mode = "Depth"; break;
                 case RenderMode_Normals:   mode = "Normals"; break;
@@ -156,6 +158,19 @@ struct ExampleApp : SlimApp {
                 case RenderMode_UVs:       mode = "UVs"; break;
             }
             Mode.value.string = mode;
+        } else {
+            if ((key == 'Z' || key == 'X') && selection.geometry) {
+                Geometry &geo = *selection.geometry;
+                char inc = key == 'X' ? 1 : -1;
+                if (controls::is_pressed::ctrl) {
+                    Material &M = scene.materials[geo.material_id];
+                    M.roughness = clampedValue(M.roughness + (f32)inc * 0.05f, 0.05f, 1.0f);
+                } else if (selection.geometry != &floor)
+                    geo.material_id = ((geo.material_id + inc + MaterialCount - 2) % (MaterialCount - 1)) + 1;
+
+                uploadMaterials(scene);
+                updateSelectionInHUD();
+            }
         }
         Move &move = viewport.navigation.move;
         Turn &turn = viewport.navigation.turn;

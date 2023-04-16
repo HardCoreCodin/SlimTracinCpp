@@ -1,16 +1,18 @@
+#include "./textures.h"
+
 #include "../slim/scene/selection.h"
 #include "../slim/draw/hud.h"
 #include "../slim/draw/selection.h"
 #include "../slim/renderer/renderer.h"
 #include "../slim/app.h"
 
-
 // Or using the single-header file:
 //#include "../slim.h"
 
 struct ExampleApp : SlimApp {
-    bool antialias = false;
     bool use_gpu = USE_GPU_BY_DEFAULT;
+    bool antialias = false;
+    bool skybox_swapped = false;
 
     // HUD:
     HUDLine FPS {"FPS : "};
@@ -31,24 +33,22 @@ struct ExampleApp : SlimApp {
     Light *lights{&key_light};
 
     u8 flags{MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
-    Material floor_material{0.8f, 0.2f, flags, 2, {0, 1}};
+    Material floor_material{0.8f, 0.2f, flags,
+                            2, {Floor_Albedo, Floor_Normal}};
     Material *materials{&floor_material};
 
     Geometry floor {{{}, {}, {40, 1, 40}},GeometryType_Quad};
     Geometry *geometries{&floor};
 
-    Texture textures[2];
-    char string_buffers[2][200]{};
-    String texture_files[2]{
-        String::getFilePath("floor_albedo.texture",string_buffers[0],__FILE__),
-        String::getFilePath("floor_normal.texture",string_buffers[1],__FILE__),
-    };
-
-    Scene scene{{1,1,3,1,2},
+    Scene scene{{1,1,3,1,TextureCount},
                 geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 
-    RayTracingRenderer renderer{scene};
+    RayTracingRenderer renderer{scene,
+                                1,
+                                Cathedral_SkyboxColor,
+                                Cathedral_SkyboxRadiance,
+                                Cathedral_SkyboxIrradiance};
 
     void OnUpdate(f32 delta_time) override {
         i32 fps = (i32)render_timer.average_frames_per_second;
@@ -69,8 +69,18 @@ struct ExampleApp : SlimApp {
     void OnKeyChanged(u8 key, bool is_pressed) override {
         if (!is_pressed) {
             if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
-            if (key == 'A' && controls::is_pressed::shift) { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
-            if (key == 'G') use_gpu = !use_gpu;
+            if (key == 'G' && USE_GPU_BY_DEFAULT) use_gpu = !use_gpu;
+            if (key == 'V') {
+                antialias = !antialias;
+                canvas.antialias = antialias ? SSAA : NoAA;
+            }
+            if (key == 'M') {
+                skybox_swapped = !skybox_swapped;
+                char inc = skybox_swapped ? 3 : -3;
+                renderer.settings.skybox_color_texture_id += inc;
+                renderer.settings.skybox_radiance_texture_id += inc;
+                renderer.settings.skybox_irradiance_texture_id += inc;
+            }
             if (key == '1') renderer.settings.render_mode = RenderMode_Beauty;
             if (key == '2') renderer.settings.render_mode = RenderMode_Depth;
             if (key == '3') renderer.settings.render_mode = RenderMode_Normals;
@@ -78,7 +88,7 @@ struct ExampleApp : SlimApp {
             if (key == '5') renderer.settings.render_mode = RenderMode_MipLevel;
             if (key == '6') renderer.settings.render_mode = RenderMode_UVs;
             const char* mode;
-            switch ( renderer.settings.render_mode) {
+            switch (renderer.settings.render_mode) {
                 case RenderMode_Beauty:    mode = "Beauty"; break;
                 case RenderMode_Depth:     mode = "Depth"; break;
                 case RenderMode_Normals:   mode = "Normals"; break;

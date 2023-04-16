@@ -9,13 +9,19 @@ u32 getSizeInBytes(const Texture &texture) {
     u32 mip_height = texture.height;
     u32 memory_size = 0;
 
-    do {
-        memory_size += sizeof(TextureMip);
-        memory_size += (mip_width + 1) * (mip_height + 1) * sizeof(TexelQuad);
+    if (texture.flags.cubemap) {
+        mip_height = texture.height + 1;
+        mip_width = texture.height * 4 + 1;
+        memory_size = sizeof(TextureMip) * 3 + sizeof(TexelQuad) * (mip_height * (mip_width + 2 * mip_height));
+    } else {
+        do {
+            memory_size += sizeof(TextureMip);
+            memory_size += (mip_width + 1) * (mip_height + 1) * sizeof(TexelQuad);
 
-        mip_width /= 2;
-        mip_height /= 2;
-    } while (texture.flags.mipmap && mip_width > 2 && mip_height > 2);
+            mip_width /= 2;
+            mip_height /= 2;
+        } while (texture.flags.mipmap && mip_width > 2 && mip_height > 2);
+    }
 
     return memory_size;
 }
@@ -28,12 +34,20 @@ bool allocateMemory(Texture &texture, memory::MonotonicAllocator *memory_allocat
     u32 mip_width  = texture.width;
     u32 mip_height = texture.height;
 
-    do {
-        texture_mip->texel_quads = (TexelQuad*)memory_allocator->allocate(sizeof(TexelQuad) * (mip_height + 1) * (mip_width + 1));
-        mip_width /= 2;
-        mip_height /= 2;
-        texture_mip++;
-    } while (texture.flags.mipmap && mip_width > 2 && mip_height > 2);
+    if (texture.flags.cubemap) {
+        mip_height = texture.height + 1;
+        mip_width = texture.height * 4 + 1;
+        (texture_mip++)->texel_quads = (TexelQuad*)memory_allocator->allocate(sizeof(TexelQuad) * mip_width * mip_height);
+        (texture_mip++)->texel_quads = (TexelQuad*)memory_allocator->allocate(sizeof(TexelQuad) * mip_height * mip_height);
+        (texture_mip++)->texel_quads = (TexelQuad*)memory_allocator->allocate(sizeof(TexelQuad) * mip_height * mip_height);
+    } else {
+        do {
+            texture_mip->texel_quads = (TexelQuad*)memory_allocator->allocate(sizeof(TexelQuad) * (mip_height + 1) * (mip_width + 1));
+            mip_width /= 2;
+            mip_height /= 2;
+            texture_mip++;
+        } while (texture.flags.mipmap && mip_width > 2 && mip_height > 2);
+    }
 
     return true;
 }

@@ -1,3 +1,5 @@
+#include "./textures.h"
+
 #include "../slim/scene/selection.h"
 #include "../slim/draw/hud.h"
 #include "../slim/draw/bvh.h"
@@ -10,9 +12,11 @@
 //#include "../slim.h"
 
 struct ExampleApp : SlimApp {
-    bool draw_BVH = false;
-    bool antialias = false;
     bool use_gpu = USE_GPU_BY_DEFAULT;
+    bool antialias = false;
+    bool skybox_swapped = false;
+    bool draw_BVH = false;
+    bool cutout = false;
 
     // HUD:
     HUDLine FPS {"FPS : "};
@@ -30,25 +34,21 @@ struct ExampleApp : SlimApp {
     Viewport viewport{canvas, &camera};
 
     // Scene:
-    Light key_light{ {1.0f, 1.0f, 0.65f}, {10, 13, -7}, 200.0f};
-    Light fill_light{{0.65f, 0.65f, 1.0f}, {-15, 15, -3}, 200.0f};
-    Light rim_light{ {1.0f, 0.25f, 0.25f}, {8, 7, 15}, 200.0f};
+    Light key_light{ {1.0f, 1.0f, 0.65f}, {-9, 8, -2}, 100.0f};
     Light *lights{&key_light};
 
-    enum MATERIAL {
-        MATERIAL_FLOOR,
-        MATERIAL_MIRROR,
-        MATERIAL_GLASS,
-        MATERIAL_COUNT
+    enum MaterialID {
+        Floor_MaterialID,
+        Mirror_MaterialID,
+        Glass_MaterialID,
+
+        MaterialCount
     };
 
-    Material floor_material{
-        0.8f, 0.2f,
-        MATERIAL_HAS_NORMAL_MAP |
-              MATERIAL_HAS_ALBEDO_MAP,
-        2, {0, 1}
-    };
-    Material Mirror{
+    u8 flags{MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
+    Material floor_material{0.8f, 0.2f, flags,
+                            2, {Floor_Albedo, Floor_Normal}};
+    Material mirror_material{
         0.0f, 0.02f,
         MATERIAL_IS_REFLECTIVE |
               MATERIAL_HAS_NORMAL_MAP,
@@ -56,7 +56,7 @@ struct ExampleApp : SlimApp {
         BRDF_CookTorrance, 0.02f, 0.2f,  0.0f,
         IOR_AIR, F0_Aluminium
     };
-    Material Glass {
+    Material glass_material {
         0.05f,0.25f,
         MATERIAL_IS_REFRACTIVE |
               MATERIAL_HAS_NORMAL_MAP,
@@ -67,25 +67,22 @@ struct ExampleApp : SlimApp {
     Material *materials{&floor_material};
 
     OrientationUsingQuaternion wall_rot{75 * DEG_TO_RAD, 0, 90.0f * DEG_TO_RAD};
-    Geometry floor {{{},{       },{40, 1, 40}},GeometryType_Quad,  MATERIAL_FLOOR};
-    Geometry wall  {{wall_rot, {-6, 8, 15}, {6, 1, 10}}, GeometryType_Quad, MATERIAL_MIRROR};
-    Geometry box{   {{},{-9, 8, -2},{2, 2, 3}},GeometryType_Box,   MATERIAL_MIRROR};
-    Geometry tet{   {{},{-3, 5, -3},{4, 3, 4}},GeometryType_Tet,   MATERIAL_MIRROR};
-    Geometry sphere{{{},{ 3, 7, 2  },{4, 3, 3}},GeometryType_Sphere,MATERIAL_GLASS, 0, GEOMETRY_IS_VISIBLE};
+    Geometry floor {{{},{       },{40, 1, 40}},GeometryType_Quad,  Floor_MaterialID};
+    Geometry wall  {{wall_rot, {-6, 8, 15}, {6, 1, 10}}, GeometryType_Quad, Mirror_MaterialID};
+    Geometry box{   {{},{-9, 8, -2},{2, 2, 3}},GeometryType_Box,   Glass_MaterialID, 0, GEOMETRY_IS_VISIBLE};
+    Geometry tet{   {{},{-3, 5, -3},{4, 3, 4}},GeometryType_Tet,   Glass_MaterialID, 0, GEOMETRY_IS_VISIBLE};
+    Geometry sphere{{{},{ 3, 7, 2  },{4, 3, 3}},GeometryType_Sphere,Glass_MaterialID, 0, GEOMETRY_IS_VISIBLE};
     Geometry *geometries{&floor};
 
-    Texture textures[2];
-    char string_buffers[2][200]{};
-    String texture_files[2]{
-        String::getFilePath("floor_albedo.texture",string_buffers[0],__FILE__),
-        String::getFilePath("floor_normal.texture",string_buffers[1],__FILE__),
-    };
-
-    Scene scene{{5,1,3,MATERIAL_COUNT,2},
+    Scene scene{{5,1,1,MaterialCount,TextureCount},
                 geometries, cameras, lights, materials, textures, texture_files};
     Selection selection;
 
-    RayTracingRenderer renderer{scene};
+    RayTracingRenderer renderer{scene,
+                                5,
+                                Cathedral_SkyboxColor,
+                                Cathedral_SkyboxRadiance,
+                                Cathedral_SkyboxIrradiance};
 
     void OnUpdate(f32 delta_time) override {
         i32 fps = (i32)render_timer.average_frames_per_second;
@@ -112,9 +109,9 @@ struct ExampleApp : SlimApp {
         if (selection.geometry) {
             Geometry &geo = *selection.geometry;
             switch (geo.material_id) {
-                case MATERIAL_MIRROR: shader = (char*)"Mirror";  break;
-                case MATERIAL_GLASS : shader = (char*)"Glass";   break;
-                case MATERIAL_FLOOR : shader = (char*)"Floor"; break;
+                case Mirror_MaterialID: shader = (char*)"Mirror";  break;
+                case Glass_MaterialID : shader = (char*)"Glass";   break;
+                case Floor_MaterialID : shader = (char*)"Floor"; break;
                 default: break;
             }
         }
@@ -139,32 +136,27 @@ struct ExampleApp : SlimApp {
     void OnKeyChanged(u8 key, bool is_pressed) override {
         if (!is_pressed) {
             if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
-            if (key == 'A' && controls::is_pressed::shift) { antialias = !antialias; canvas.antialias = antialias ? SSAA : NoAA; }
-            if (key == 'G') use_gpu = !use_gpu;
+            if (key == 'G' && USE_GPU_BY_DEFAULT) use_gpu = !use_gpu;
             if (key == 'B') draw_BVH = !draw_BVH;
+            if (key == 'V') {
+                antialias = !antialias;
+                canvas.antialias = antialias ? SSAA : NoAA;
+            }
+            if (key == 'M') {
+                skybox_swapped = !skybox_swapped;
+                char inc = skybox_swapped ? 3 : -3;
+                renderer.settings.skybox_color_texture_id += inc;
+                renderer.settings.skybox_radiance_texture_id += inc;
+                renderer.settings.skybox_irradiance_texture_id += inc;
+            }
             if (key == '1') renderer.settings.render_mode = RenderMode_Beauty;
             if (key == '2') renderer.settings.render_mode = RenderMode_Depth;
             if (key == '3') renderer.settings.render_mode = RenderMode_Normals;
             if (key == '4') renderer.settings.render_mode = RenderMode_NormalMap;
             if (key == '5') renderer.settings.render_mode = RenderMode_MipLevel;
             if (key == '6') renderer.settings.render_mode = RenderMode_UVs;
-            if ((key == 'Z' || key == 'X')) {
-                char inc = key == 'X' ? 1 : -1;
-                if (controls::is_pressed::ctrl) {
-                    renderer.settings.max_depth += inc;
-                    if (renderer.settings.max_depth == 0) renderer.settings.max_depth = 10;
-                    if (renderer.settings.max_depth == 11) renderer.settings.max_depth = 1;
-                } else if (selection.geometry && selection.geometry != &floor) {
-                    Geometry &geo = *selection.geometry;
-                    geo.material_id = ((geo.material_id + inc + MATERIAL_COUNT - 2) % (MATERIAL_COUNT - 1)) + 1;
-                    geo.flags = GEOMETRY_IS_VISIBLE;
-                    if (geo.material_id != MATERIAL_GLASS) geo.flags |= GEOMETRY_IS_SHADOWING;
-                    uploadMaterials(scene);
-                    updateSelectionInHUD();
-                }
-            }
             const char* mode;
-            switch ( renderer.settings.render_mode) {
+            switch (renderer.settings.render_mode) {
                 case RenderMode_Beauty:    mode = "Beauty"; break;
                 case RenderMode_Depth:     mode = "Depth"; break;
                 case RenderMode_Normals:   mode = "Normals"; break;
@@ -173,6 +165,22 @@ struct ExampleApp : SlimApp {
                 case RenderMode_UVs:       mode = "UVs"; break;
             }
             Mode.value.string = mode;
+
+            if ((key == 'Z' || key == 'X')) {
+                char inc = key == 'X' ? 1 : -1;
+                if (controls::is_pressed::ctrl) {
+                    renderer.settings.max_depth += inc;
+                    if (renderer.settings.max_depth == 0) renderer.settings.max_depth = 10;
+                    if (renderer.settings.max_depth == 11) renderer.settings.max_depth = 1;
+                } else if (selection.geometry && selection.geometry != &floor) {
+                    Geometry &geo = *selection.geometry;
+                    geo.material_id = ((geo.material_id + inc + MaterialCount - 2) % (MaterialCount - 1)) + 1;
+                    geo.flags = GEOMETRY_IS_VISIBLE;
+                    if (geo.material_id != Glass_MaterialID) geo.flags |= GEOMETRY_IS_SHADOWING;
+                    uploadMaterials(scene);
+                    updateSelectionInHUD();
+                }
+            }
         }
         Move &move = viewport.navigation.move;
         Turn &turn = viewport.navigation.turn;

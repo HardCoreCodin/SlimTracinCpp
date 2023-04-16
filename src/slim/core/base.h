@@ -420,6 +420,68 @@ enum BoxSide {
     BoxSide_Front  = 32
 };
 
+
+INLINE_XPU void setUVByBoxSide(BoxSide side, f32 X, f32 Y, f32 Z, f32 *u, f32 *v) {
+    switch (side) {
+        case BoxSide_Top: {
+            *u = X;
+            *v = Z;
+        } break;
+        case BoxSide_Bottom: {
+            *u = -X;
+            *v = -Z;
+        } break;
+        case BoxSide_Left: {
+            *u = -Z;
+            *v = Y;
+        } break;
+        case BoxSide_Right: {
+            *u = Z;
+            *v = Y;
+        } break;
+        case BoxSide_Front: {
+            *u = X;
+            *v = Y;
+        } break;
+        default: {
+            *u = -X;
+            *v = Y;
+        } break;
+    }
+    *u = fast_mul_add(*u, 0.5f, 0.5f);
+    *v = fast_mul_add(*v, 0.5f, 0.5f);
+}
+
+INLINE_XPU void setUVBySphere(f32 X, f32 Y, f32 Z, f32 *u, f32 *v, BoxSide *side = nullptr) {
+    f32 z_over_x = X ? (Z / X) : 2;
+    f32 y_over_x = X ? (Y / X) : 2;
+    if (z_over_x <=  1 &&
+        z_over_x >= -1 &&
+        y_over_x <=  1 &&
+        y_over_x >= -1) { // Right or Left
+        *u = z_over_x;
+        *v = X > 0 ? y_over_x : -y_over_x;
+        if (side) *side = X > 0 ? BoxSide_Right : BoxSide_Left;
+    } else {
+        f32 x_over_z = Z ? (X / Z) : 2;
+        f32 y_over_z = Z ? (Y / Z) : 2;
+        if (x_over_z <=  1 &&
+            x_over_z >= -1 &&
+            y_over_z <=  1 &&
+            y_over_z >= -1) { // Front or Back:
+            *u = -x_over_z;
+            *v = Z > 0 ? y_over_z : -y_over_z;
+            if (side) *side = Z > 0 ? BoxSide_Front : BoxSide_Back;
+        } else { // Top or Bottom
+            *u = X / (Y > 0 ? Y : -Y);
+            *v = Z / Y;
+            if (side) *side = Y > 0 ? BoxSide_Top : BoxSide_Bottom;
+        }
+    }
+    *u = fast_mul_add(*u, 0.5f, 0.5f);
+    *v = fast_mul_add(*v, 0.5f, 0.5f);
+}
+
 struct Sides {
     union {
         u8 mask;
@@ -1039,6 +1101,13 @@ struct Pixel {
     INLINE_XPU Pixel(u8 R, u8 G, u8 B, u8 A) : Pixel{ByteColor{R, G, B, A}} {}
     INLINE_XPU Pixel(f32 value, f32 opacity = 1.0f) : color{Color{value, value, value}}, opacity{opacity} {}
 
+    INLINE_XPU Pixel lerpTo(const Pixel &to, f32 by) {
+        return {
+            color.lerpTo(to.color, by),
+            opacity + (to.opacity - opacity) * by
+        };
+    }
+
     INLINE_XPU Pixel& operator = (f32 value) {
         color = value;
         opacity = 0.0f;
@@ -1201,6 +1270,8 @@ union ImageFlags {
         unsigned int mipmap:1;
         unsigned int flip:1;
         unsigned int wrap:1;
+        unsigned int normal:1;
+        unsigned int cubemap:1;
     };
     u32 flags = 0;
 };
