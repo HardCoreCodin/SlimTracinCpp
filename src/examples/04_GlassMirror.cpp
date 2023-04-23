@@ -20,13 +20,31 @@ struct ExampleApp : SlimApp {
 
     // HUD:
     HUDLine FPS {"FPS : "};
-    HUDLine GPU {"GPU : ", "On", "Off",&use_gpu};
-    HUDLine AA  {"AA  : ", "On", "Off",&antialias};
-    HUDLine BVH {"BVH : ", "On", "Off",&draw_BVH};
+    HUDLine GPU {"GPU : ", "Off","On", &use_gpu};
+    HUDLine AA  {"AA  : ", "Off","On", &antialias};
+    HUDLine BVH {"BVH : ", "Off","On", &draw_BVH};
     HUDLine Mode{"Mode: ", "Beauty"};
-    HUDLine Shader{ "Material : "};
+    HUDLine Shader{ "Shader : "};
     HUDLine Bounces{"Bounces: "};
     HUD hud{{7}, &FPS};
+
+    enum MaterialID { Floor, Mirror, Glass, MaterialCount };
+
+    void updateSelectionInHUD() {
+        const char* shader = "";
+        if (selection.geometry) {
+            Geometry &geo = *selection.geometry;
+            switch (geo.material_id) {
+                case Floor : shader = "Floor";  break;
+                case Mirror: shader = "Mirror"; break;
+                case Glass : shader = "Glass";  break;
+                default: break;
+            }
+        }
+        Shader.value.string.copyFrom(shader, 0);
+
+        selection.changed = false;
+    }
 
     // Viewport:
     Camera camera{{-25 * DEG_TO_RAD, 0, 0}, {-4, 15, -17}}, *cameras{&camera};
@@ -36,14 +54,6 @@ struct ExampleApp : SlimApp {
     // Scene:
     Light key_light{ {1.0f, 1.0f, 0.65f}, {-9, 8, -2}, 100.0f};
     Light *lights{&key_light};
-
-    enum MaterialID {
-        Floor_MaterialID,
-        Mirror_MaterialID,
-        Glass_MaterialID,
-
-        MaterialCount
-    };
 
     u8 flags{MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
     Material floor_material{0.8f, 0.2f, flags,
@@ -67,11 +77,11 @@ struct ExampleApp : SlimApp {
     Material *materials{&floor_material};
 
     OrientationUsingQuaternion wall_rot{75 * DEG_TO_RAD, 0, 90.0f * DEG_TO_RAD};
-    Geometry floor {{{},{       },{40, 1, 40}},GeometryType_Quad,  Floor_MaterialID};
-    Geometry wall  {{wall_rot, {-6, 8, 15}, {6, 1, 10}}, GeometryType_Quad, Mirror_MaterialID};
-    Geometry box{   {{},{-9, 8, -2},{2, 2, 3}},GeometryType_Box,   Glass_MaterialID, 0, GEOMETRY_IS_VISIBLE};
-    Geometry tet{   {{},{-3, 5, -3},{4, 3, 4}},GeometryType_Tet,   Glass_MaterialID, 0, GEOMETRY_IS_VISIBLE};
-    Geometry sphere{{{},{ 3, 7, 2  },{4, 3, 3}},GeometryType_Sphere,Glass_MaterialID, 0, GEOMETRY_IS_VISIBLE};
+    Geometry floor {{{},{       },{40, 1, 40}}, GeometryType_Quad, Floor};
+    Geometry wall  {{wall_rot, {-6, 8, 15}, {6, 1, 10}}, GeometryType_Quad, Mirror};
+    Geometry box{{{},{-9, 8, -2},{2, 2, 3}}, GeometryType_Box, Glass, 0, GEOMETRY_IS_VISIBLE};
+    Geometry tet{{{},{-3, 5, -3},{4, 3, 4}}, GeometryType_Tet, Glass, 0, GEOMETRY_IS_VISIBLE};
+    Geometry sphere{{{},{ 3, 7, 2  },{4, 3, 3}}, GeometryType_Sphere, Glass, 0, GEOMETRY_IS_VISIBLE};
     Geometry *geometries{&floor};
 
     Scene scene{{5,1,1,MaterialCount,TextureCount},
@@ -88,7 +98,6 @@ struct ExampleApp : SlimApp {
         i32 fps = (i32)render_timer.average_frames_per_second;
         FPS.value = fps;
         FPS.value_color = fps >= 60 ? Green : (fps >= 24 ? Cyan : (fps < 12 ? Red : Yellow));
-        Bounces.value = (i32)renderer.settings.max_depth;
 
         if (!mouse::is_captured) selection.manipulate(viewport, scene);
         if (selection.changed) updateSelectionInHUD();
@@ -104,30 +113,9 @@ struct ExampleApp : SlimApp {
         }
     }
 
-    void updateSelectionInHUD() {
-        const char* shader = "";
-        if (selection.geometry) {
-            Geometry &geo = *selection.geometry;
-            switch (geo.material_id) {
-                case Mirror_MaterialID: shader = (char*)"Mirror";  break;
-                case Glass_MaterialID : shader = (char*)"Glass";   break;
-                case Floor_MaterialID : shader = (char*)"Floor"; break;
-                default: break;
-            }
-        }
-        Shader.value.string.copyFrom(shader, 0);
-
-        selection.changed = false;
-    }
-
     void OnRender() override {
         renderer.render(viewport, true, use_gpu);
-        if (draw_BVH) {
-            for (u32 i = 0; i < scene.counts.geometries; i++)
-                if (geometries[i].type == GeometryType_Mesh)
-                    drawBVH(scene.meshes[geometries[i].id].bvh, geometries[i].transform, viewport);
-            drawBVH(scene.bvh, {}, viewport);
-        }
+        if (draw_BVH) drawSceneBVH();
         if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
         if (hud.enabled) drawHUD(hud, canvas);
         canvas.drawToWindow();
@@ -172,11 +160,15 @@ struct ExampleApp : SlimApp {
                     renderer.settings.max_depth += inc;
                     if (renderer.settings.max_depth == 0) renderer.settings.max_depth = 10;
                     if (renderer.settings.max_depth == 11) renderer.settings.max_depth = 1;
-                } else if (selection.geometry && selection.geometry != &floor) {
+                    Bounces.value = (i32)renderer.settings.max_depth;
+                } else if (selection.geometry) {
                     Geometry &geo = *selection.geometry;
-                    geo.material_id = ((geo.material_id + inc + MaterialCount - 2) % (MaterialCount - 1)) + 1;
+                    if (&geo == &floor)
+                        geo.material_id = (geo.material_id + inc + MaterialCount) % MaterialCount;
+                    else
+                        geo.material_id = ((geo.material_id + inc + MaterialCount - 2) % (MaterialCount - 1)) + 1;
                     geo.flags = GEOMETRY_IS_VISIBLE;
-                    if (geo.material_id != Glass_MaterialID) geo.flags |= GEOMETRY_IS_SHADOWING;
+                    if (geo.material_id != Glass) geo.flags |= GEOMETRY_IS_SHADOWING;
                     uploadMaterials(scene);
                     updateSelectionInHUD();
                 }
@@ -207,6 +199,23 @@ struct ExampleApp : SlimApp {
             os::setWindowCapture(    mouse::is_captured);
             OnMouseButtonDown(mouse_button);
         }
+    }
+
+    void drawSceneBVH() {
+        static Box box;
+        static AABB aabb;
+        for (u32 i = 0; i < scene.counts.geometries; i++) {
+            Geometry &geo{scene.geometries[i]};
+            aabb.max = geo.type == GeometryType_Tet ? TET_MAX : 1.0f;
+            aabb.min = -aabb.max.x;
+            if (geo.type == GeometryType_Quad) {
+                aabb.min.y = -EPS;
+                aabb.max.y = EPS;
+            }
+            box.vertices = aabb;
+            drawBox(box, geo.transform, viewport, BrightYellow, 0.5f);
+        }
+        drawBVH(scene.bvh, {}, viewport, 1, scene.bvh.height);
     }
 };
 

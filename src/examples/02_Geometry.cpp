@@ -20,10 +20,10 @@ struct ExampleApp : SlimApp {
 
     // HUD:
     HUDLine FPS {"FPS : "};
-    HUDLine GPU {"GPU : ", "On", "Off",&use_gpu};
-    HUDLine AA  {"AA  : ", "On", "Off",&antialias};
-    HUDLine BVH {"BVH : ", "On", "Off",&draw_BVH};
-    HUDLine Cut {"Cut : ", "On", "Off",&cutout};
+    HUDLine GPU {"GPU : ", "Off","On", &use_gpu};
+    HUDLine AA  {"AA  : ", "Off","On", &antialias};
+    HUDLine BVH {"BVH : ", "Off","On", &draw_BVH};
+    HUDLine Cut {"Cut : ", "Off","On", &cutout};
     HUDLine Mode{"Mode: ", "Beauty"};
     HUD hud{{6}, &FPS};
 
@@ -42,12 +42,7 @@ struct ExampleApp : SlimApp {
 
     Light *lights{&key_light};
 
-    enum MaterialID {
-        Floor_MaterialID,
-        Rough_MaterialID,
-
-        MaterialCount
-    };
+    enum MaterialID { Floor, Rough, MaterialCount };
 
     Material floor_material{0.8f, 0.2f, MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP,
                             2, {Floor_Albedo, Floor_Normal}};
@@ -55,10 +50,10 @@ struct ExampleApp : SlimApp {
     Material *materials{&floor_material};
 
     u8 flags = GEOMETRY_IS_VISIBLE | GEOMETRY_IS_SHADOWING | GEOMETRY_IS_TRANSPARENT;
-    Geometry floor {{{},{       },{40, 1, 40}},GeometryType_Quad, Floor_MaterialID};
-    Geometry box{   {{},{-9, 8, -2},{2, 2, 3}},GeometryType_Box,Rough_MaterialID ,0, flags};
-    Geometry tet{   {{},{-3, 6, 14},{4, 3, 4}},GeometryType_Tet,Rough_MaterialID ,0, flags};
-    Geometry sphere{{{},{3, 6, 2  },{4, 3, 3}},GeometryType_Sphere,Rough_MaterialID ,0, flags};
+    Geometry floor {{{},{       },{40, 1, 40}}, GeometryType_Quad, Floor};
+    Geometry box{{{},{-9, 8, -2},{2, 2, 3}}, GeometryType_Box, Rough , 0, flags};
+    Geometry tet{{{},{-3, 6, 14},{4, 3, 4}}, GeometryType_Tet, Rough , 0, flags};
+    Geometry sphere{{{},{3, 6, 2  },{4, 3, 3}}, GeometryType_Sphere, Rough , 0, flags};
     Geometry *geometries{&floor};
 
     Scene scene{{4,1,6,MaterialCount,TextureCount},
@@ -74,19 +69,33 @@ struct ExampleApp : SlimApp {
     void OnUpdate(f32 delta_time) override {
         i32 fps = (i32)render_timer.average_frames_per_second;
         FPS.value = fps;
-        FPS.value_color = fps >= 60 ? Green : (fps >= 24 ? Cyan : (fps < 12 ? Red : Yellow));
+        FPS.value_color = fps >= 60 ? Green : (
+            fps >= 24 ? Cyan : (fps < 12 ? Red : Yellow)
+        );
 
-        if (!mouse::is_captured) selection.manipulate(viewport, scene);
-        if (selection.changed) updateSelectionInHUD();
-        if (!controls::is_pressed::alt) viewport.updateNavigation(delta_time);
+        if (!mouse::is_captured)
+            selection.manipulate(viewport, scene);
 
-        static vec3 axis{OrientationUsingQuaternion{0.02f, 0.04f, 0.06f}.axis};
+        if (selection.changed)
+            updateSelectionInHUD();
+
+        if (!controls::is_pressed::alt)
+            viewport.updateNavigation(delta_time);
+
+        static vec3 axis{OrientationUsingQuaternion{
+            DEG_TO_RAD,
+            DEG_TO_RAD * 2,
+            DEG_TO_RAD * 3
+        }.axis};
         quat rot = quat::AxisAngle(axis, delta_time * 10.0f);
+
         for (u32 i = 0; i < scene.counts.geometries; i++) {
             Geometry &geo = geometries[i];
-            if (!(controls::is_pressed::alt && &geo == selection.geometry) &&
-                geo.type != GeometryType_Quad && geo.type != GeometryType_Mesh)
-                geo.transform.orientation = (geo.transform.orientation * rot).normalized();
+            if (!(controls::is_pressed::alt &&
+                  &geo == selection.geometry) &&
+                geo.type != GeometryType_Quad &&
+                geo.type != GeometryType_Mesh)
+                geo.transform.orientation *= rot;
         }
     }
 
@@ -97,12 +106,7 @@ struct ExampleApp : SlimApp {
 
     void OnRender() override {
         renderer.render(viewport, true, use_gpu);
-        if (draw_BVH) {
-            for (u32 i = 0; i < scene.counts.geometries; i++)
-                if (geometries[i].type == GeometryType_Mesh)
-                    drawBVH(scene.meshes[geometries[i].id].bvh, geometries[i].transform, viewport);
-            drawBVH(scene.bvh, {}, viewport);
-        }
+        if (draw_BVH) drawSceneBVH();
         if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
         if (hud.enabled) drawHUD(hud, canvas);
         canvas.drawToWindow();
@@ -175,6 +179,23 @@ struct ExampleApp : SlimApp {
             os::setWindowCapture(    mouse::is_captured);
             OnMouseButtonDown(mouse_button);
         }
+    }
+
+    void drawSceneBVH() {
+        static Box box;
+        static AABB aabb;
+        for (u32 i = 0; i < scene.counts.geometries; i++) {
+            Geometry &geo{scene.geometries[i]};
+            aabb.max = geo.type == GeometryType_Tet ? TET_MAX : 1.0f;
+            aabb.min = -aabb.max.x;
+            if (geo.type == GeometryType_Quad) {
+                aabb.min.y = -EPS;
+                aabb.max.y = EPS;
+            }
+            box.vertices = aabb;
+            drawBox(box, geo.transform, viewport, BrightYellow, 0.5f);
+        }
+        drawBVH(scene.bvh, {}, viewport, 1, scene.bvh.height);
     }
 };
 

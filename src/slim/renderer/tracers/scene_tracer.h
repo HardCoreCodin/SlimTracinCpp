@@ -39,10 +39,24 @@ struct SceneTracer {
         aux_ray.localize(ray, geo.transform);
         aux_ray.pixel_coords = ray.pixel_coords;
         aux_ray.depth = ray.depth;
+        f32 n, f;
+        AABB aabb;
+
+        if (geo.type == GeometryType_Mesh) {
+            aabb = meshes[geo.id].aabb;
+        } else {
+            aabb.max = geo.type == GeometryType_Tet ? TET_MAX : 1.0f;
+            aabb.min = -aabb.max.x;
+            if (geo.type == GeometryType_Quad) {
+                aabb.min.y = -EPS;
+                aabb.max.y = EPS;
+            }
+        }
+        if (!aux_ray.hitsAABB(aabb, n, f)) return false;
 
         switch (geo.type) {
-            case GeometryType_Quad  : return aux_ray.hitsDefaultQuad(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
-            case GeometryType_Box   : return aux_ray.hitsDefaultBox(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
+            case GeometryType_Quad: return aux_ray.hitsDefaultQuad(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
+            case GeometryType_Box: return aux_ray.hitsDefaultBox(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
             case GeometryType_Sphere: return aux_ray.hitsDefaultSphere(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
             case GeometryType_Tet   : return aux_ray.hitsDefaultTetrahedron(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
             case GeometryType_Mesh  : return mesh_tracer.trace(meshes[geo.id], aux_ray, hit, any_hit);

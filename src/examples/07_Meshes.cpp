@@ -20,12 +20,12 @@ struct ExampleApp : SlimApp {
 
     // HUD:
     HUDLine FPS {"FPS : "};
-    HUDLine GPU {"GPU : ", "On", "Off",&use_gpu};
-    HUDLine AA  {"AA  : ", "On", "Off",&antialias};
-    HUDLine BVH {"BVH : ", "On", "Off",&draw_BVH};
-    HUDLine Cut {"Cut : ", "On", "Off",&cutout};
-    HUDLine Mode{"Mode: ", "Beauty"};
-    HUDLine Shader{   "Material : "};
+    HUDLine GPU {"GPU : ","Off","On",&use_gpu};
+    HUDLine AA  {"AA  : ","Off","On",&antialias};
+    HUDLine BVH {"BVH : ","Off","On",&draw_BVH};
+    HUDLine Cut {"Cut : ","Off","On",&cutout};
+    HUDLine Mode{"Mode: ","Beauty"};
+    HUDLine Shader{   "Shader   : "};
     HUDLine Roughness{"Roughness: "};
     HUDLine Bounces{  "Bounces  : "};
     HUD hud{{9}, &FPS};
@@ -41,19 +41,7 @@ struct ExampleApp : SlimApp {
     Light glass_light2{ {0.25f, 0.25f, 1.0f}, {-0.6f, 1.75f, -3.15f}, 20.0f};
     Light *lights{&rim_light};
 
-    enum MaterialID {
-        Floor_MaterialID,
-        Dog_MaterialID,
-
-        Rough_MaterialID,
-        Phong_MaterialID,
-        Blinn_MaterialID,
-
-        Mirror_MaterialID,
-        Glass_MaterialID,
-
-        MaterialCount
-    };
+    enum MaterialID { Floor, DogMaterial, Rough, Phong, Blinn, Mirror, Glass, MaterialCount };
 
     u8 flags{MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
     Material floor_material{0.8f, 0.2f, flags,
@@ -83,26 +71,35 @@ struct ExampleApp : SlimApp {
     };
     Material *materials{&floor_material};
 
-    OrientationUsingQuaternion rot{0, -45 * DEG_TO_RAD, 0};
-    Geometry floor {{{},{}, {40, 1, 40}},GeometryType_Quad};
-    Geometry sphere{{{},{4, 1, -4}},GeometryType_Sphere,Mirror_MaterialID};
-    Geometry monkey{{rot,{6, 4.5, 2}, 0.4f},    GeometryType_Mesh,Glass_MaterialID, 0, GEOMETRY_IS_VISIBLE};
-    Geometry dragon{{{},{-2, 2, -3}},   GeometryType_Mesh,Glass_MaterialID, 1, GEOMETRY_IS_VISIBLE};
-    Geometry dog   {{rot,{4, 2.1f, 3}, 0.8f},    GeometryType_Mesh,Dog_MaterialID, 2};
-    Geometry *geometries{&floor};
 
-    Mesh meshes[3];
-    char strings[3][100]{};
-    String mesh_files[3] = {
-        String::getFilePath("monkey.mesh",strings[0],__FILE__),
-        String::getFilePath("dragon.mesh",strings[1],__FILE__),
-        String::getFilePath("dog.mesh"   ,strings[2],__FILE__)
+    enum MesheID { Monkey, Dragon, Dog, MeshCount };
+
+    Mesh meshes[MeshCount];
+    char strings[MeshCount][100]{};
+    String mesh_files[MeshCount] = {
+        String::getFilePath("monkey.mesh",strings[Monkey],__FILE__),
+        String::getFilePath("dragon.mesh",strings[Dragon],__FILE__),
+        String::getFilePath("dog.mesh"   ,strings[Dog   ],__FILE__)
     };
 
-    Scene scene{{5,1,3,MaterialCount,TextureCount,3},
-                geometries, cameras, lights, materials, textures, texture_files, meshes, mesh_files};
-    Selection selection;
+    OrientationUsingQuaternion rot{0, -45 * DEG_TO_RAD, 0};
+    Geometry floor {{{},{}, {40, 1, 40}},
+                    GeometryType_Quad, Floor};
+    Geometry sphere{{{},{4, 1, -4}},
+                    GeometryType_Sphere, Mirror};
+    Geometry monkey{{rot,{6, 4.5, 2}, 0.4f},
+                    GeometryType_Mesh, Glass,      Monkey};
+    Geometry dragon{{{},{-2, 2, -3}},
+                    GeometryType_Mesh, Glass,      Dragon};
+    Geometry dog   {{rot,{4, 2.1f, 3}, 0.8f},
+                    GeometryType_Mesh, DogMaterial,   Dog};
+    Geometry *geometries{&floor};
 
+    Scene scene{{5,1,3,
+                 MaterialCount,TextureCount, MeshCount},
+                geometries, cameras, lights, materials, textures, texture_files, meshes, mesh_files};
+
+    Selection selection;
     RayTracingRenderer renderer{scene,
                                 5,
                                 Cathedral_SkyboxColor,
@@ -122,6 +119,11 @@ struct ExampleApp : SlimApp {
         quat rot = quat::RotationAroundY(delta_time * 0.25f);
         for (u32 i = 1; i < scene.counts.geometries; i++) {
             Geometry &geo{geometries[i]};
+            if (geo.material_id == Glass)
+                geo.flags &= ~GEOMETRY_IS_SHADOWING;
+            else
+                geo.flags |= GEOMETRY_IS_SHADOWING;
+
             if (&geo != &dragon) {
                 rot.amount = -rot.amount;
                 if (!(controls::is_pressed::alt && selection.geometry == &geo))
@@ -130,59 +132,40 @@ struct ExampleApp : SlimApp {
         }
     }
 
-    void updateSelectionInHUD() {
-        const char* material = "";
-        if (selection.geometry) {
-            Geometry &geo = *selection.geometry;
-            switch (geo.material_id) {
-                case Floor_MaterialID:  material = "Floor";  break;
-                case Dog_MaterialID:    material = "Dog";    break;
-                case Rough_MaterialID:  material = "Rough";  break;
-                case Phong_MaterialID:  material = "Phong";  break;
-                case Blinn_MaterialID:  material = "Blinn";  break;
-                case Mirror_MaterialID: material = "Mirror"; break;
-                case Glass_MaterialID:  material = "Glass";  break;
-                default: material = "";
-            }
-            Roughness.value = materials[geo.material_id].roughness;
-        } else
-            Roughness.value.string.copyFrom("", 0);
-
-        Shader.value.string.copyFrom(material, 0);
-        cutout = selection.geometry && (selection.geometry->flags & GEOMETRY_IS_TRANSPARENT);
-
-        selection.changed = false;
-    }
-
     void OnRender() override {
         renderer.render(viewport, true, use_gpu);
-        if (draw_BVH) {
-            for (u32 i = 0; i < scene.counts.geometries; i++)
-                if (geometries[i].type == GeometryType_Mesh)
-                    drawBVH(scene.meshes[geometries[i].id].bvh, geometries[i].transform, viewport);
-            drawBVH(scene.bvh, {}, viewport);
-        }
+        if (draw_BVH) drawSceneBVH();
         if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
         if (hud.enabled) drawHUD(hud, canvas);
         canvas.drawToWindow();
     }
 
+    void updateSelectionInHUD() {
+        const char* shader = "";
+        if (selection.geometry) {
+            Geometry &geo = *selection.geometry;
+            cutout = geo.flags & GEOMETRY_IS_TRANSPARENT;
+            switch (geo.material_id) {
+                case Floor      : shader = "Floor";  break;
+                case DogMaterial: shader = "Dog";    break;
+                case Rough      : shader = "Rough";  break;
+                case Phong      : shader = "Phong";  break;
+                case Blinn      : shader = "Blinn";  break;
+                case Mirror     : shader = "Mirror"; break;
+                case Glass      : shader = "Glass";  break;
+                default: break;
+            }
+            Roughness.value = materials[geo.material_id].roughness;
+        } else
+            Roughness.value.string.copyFrom("", 0);
+
+        Shader.value.string.copyFrom(shader, 0);
+
+        selection.changed = false;
+    }
+
     void OnKeyChanged(u8 key, bool is_pressed) override {
         if (!is_pressed) {
-            if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
-            if (key == 'G' && USE_GPU_BY_DEFAULT) use_gpu = !use_gpu;
-            if (key == 'B') draw_BVH = !draw_BVH;
-            if (key == 'V') {
-                antialias = !antialias;
-                canvas.antialias = antialias ? SSAA : NoAA;
-            }
-            if (key == 'M') {
-                skybox_swapped = !skybox_swapped;
-                char inc = skybox_swapped ? 3 : -3;
-                renderer.settings.skybox_color_texture_id += inc;
-                renderer.settings.skybox_radiance_texture_id += inc;
-                renderer.settings.skybox_irradiance_texture_id += inc;
-            }
             if (key == '1') renderer.settings.render_mode = RenderMode_Beauty;
             if (key == '2') renderer.settings.render_mode = RenderMode_Depth;
             if (key == '3') renderer.settings.render_mode = RenderMode_Normals;
@@ -199,49 +182,54 @@ struct ExampleApp : SlimApp {
                 case RenderMode_UVs:       mode = "UVs"; break;
             }
             Mode.value.string = mode;
-        } else {
-            if (key == 'Z' || key == 'X' || key == 'C') {
-                Geometry &geo = *selection.geometry;
-                if (key == 'C') {
-                    if (selection.geometry && geo.type != GeometryType_Mesh) {
-                        if (geo.flags & GEOMETRY_IS_TRANSPARENT)
-                            geo.flags &= ~GEOMETRY_IS_TRANSPARENT;
-                        else
-                            geo.flags |= GEOMETRY_IS_TRANSPARENT;
 
-                        cutout = geo.flags & GEOMETRY_IS_TRANSPARENT;
-                    }
-                } else {
-                    char inc = key == 'X' ? 1 : -1;
-                    if (controls::is_pressed::shift) {
-                        renderer.settings.max_depth += inc;
-                        if (renderer.settings.max_depth == 0) renderer.settings.max_depth = 10;
-                        if (renderer.settings.max_depth == 11) renderer.settings.max_depth = 1;
-                    } else if (selection.geometry && &geo != &dog) {
-                        if (controls::is_pressed::ctrl) {
-                            Material &M = scene.materials[geo.material_id];
-                            M.roughness = clampedValue(M.roughness + (f32) inc * 0.1f, 0.05f, 1.0f);
-                            uploadMaterials(scene);
-                        } else {
-                            u32 material_count = MaterialCount - 2;
-                            geo.material_id = ((geo.material_id - 2 + inc + material_count) % material_count) + 2;
-                            if (geo.material_id == Glass_MaterialID)
-                                geo.flags &= ~GEOMETRY_IS_SHADOWING;
-                            else
-                                geo.flags |= GEOMETRY_IS_SHADOWING;
-                        }
-                    }
-                }
-                updateSelectionInHUD();
+
+            if (key == controls::key_map::tab) hud.enabled = !hud.enabled;
+            if (key == 'G' && USE_GPU_BY_DEFAULT) use_gpu = !use_gpu;
+            if (key == 'B') draw_BVH = !draw_BVH;
+            if (key == 'V') {
+                antialias = !antialias;
+                canvas.antialias = antialias ? SSAA : NoAA;
             }
-
-            if (key == 'C' && selection.geometry && selection.geometry->type != GeometryType_Mesh) {
-                if (selection.geometry->flags & GEOMETRY_IS_TRANSPARENT)
-                    selection.geometry->flags &= ~GEOMETRY_IS_TRANSPARENT;
+            if (key == 'M') {
+                skybox_swapped = !skybox_swapped;
+                char inc = skybox_swapped ? 3 : -3;
+                renderer.settings.skybox_color_texture_id += inc;
+                renderer.settings.skybox_radiance_texture_id += inc;
+                renderer.settings.skybox_irradiance_texture_id += inc;
+            }
+        } else {
+            Geometry &geo = *selection.geometry;
+            if (key == 'X' || key == 'Z') {
+                char inc = key == 'X' ? 1 : -1;
+                if (controls::is_pressed::alt) {
+                    if (!(inc == -1 && min_bvh_depth == 1)) {
+                        min_bvh_depth += inc;
+                        max_bvh_depth += inc;
+                    }
+                } else if (controls::is_pressed::shift) {
+                    renderer.settings.max_depth += inc;
+                    if (renderer.settings.max_depth == 0) renderer.settings.max_depth = 10;
+                    if (renderer.settings.max_depth == 11) renderer.settings.max_depth = 1;
+                    Bounces.value = (i32)renderer.settings.max_depth;
+                } else if (selection.geometry && &geo != &dog) {
+                    if (controls::is_pressed::ctrl) {
+                        Material &M = scene.materials[geo.material_id];
+                        M.roughness = clampedValue(M.roughness + (f32) inc * 0.1f, 0.05f, 1.0f);
+                        uploadMaterials(scene);
+                    } else {
+                        u32 material_count = MaterialCount - 2;
+                        geo.material_id = ((geo.material_id - 2 + inc + material_count) % material_count) + 2;
+                    }
+                    updateSelectionInHUD();
+                }
+            } else if (key == 'C' && selection.geometry && geo.type != GeometryType_Mesh) {
+                if (geo.flags & GEOMETRY_IS_TRANSPARENT)
+                    geo.flags &= ~GEOMETRY_IS_TRANSPARENT;
                 else
-                    selection.geometry->flags |= GEOMETRY_IS_TRANSPARENT;
+                    geo.flags |= GEOMETRY_IS_TRANSPARENT;
 
-                cutout = selection.geometry->flags & GEOMETRY_IS_TRANSPARENT;
+                cutout = geo.flags & GEOMETRY_IS_TRANSPARENT;
             }
         }
         Move &move = viewport.navigation.move;
@@ -270,6 +258,31 @@ struct ExampleApp : SlimApp {
             OnMouseButtonDown(mouse_button);
         }
     }
+
+    u16 min_bvh_depth = 0;
+    u16 max_bvh_depth = 3;
+
+    void drawSceneBVH() {
+        static Box box;
+        static AABB aabb;
+        for (u32 i = 0; i < scene.counts.geometries; i++) {
+            Geometry &geo{scene.geometries[i]};
+            if (geo.type == GeometryType_Mesh) {
+                drawBVH(meshes[geo.id].bvh, geo.transform, viewport,min_bvh_depth, max_bvh_depth);
+            } else {
+                aabb.max = geo.type == GeometryType_Tet ? TET_MAX : 1.0f;
+                aabb.min = -aabb.max.x;
+                if (geo.type == GeometryType_Quad) {
+                    aabb.min.y = -EPS;
+                    aabb.max.y = EPS;
+                }
+                box.vertices = aabb;
+                drawBox(box, geo.transform, viewport, BrightYellow, 0.5f);
+            }
+        }
+        drawBVH(scene.bvh, {}, viewport, 0, scene.bvh.height);
+    }
+
 };
 
 SlimApp* createApp() {

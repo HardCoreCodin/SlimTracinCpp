@@ -16,8 +16,8 @@ struct ExampleApp : SlimApp {
 
     // HUD:
     HUDLine FPS {"FPS : "};
-    HUDLine GPU {"GPU : ", "On", "Off",&use_gpu};
-    HUDLine AA  {"AA  : ", "On", "Off",&antialias};
+    HUDLine GPU {"GPU : ", "Off", "On", &use_gpu};
+    HUDLine AA  {"AA  : ", "Off", "On", &antialias};
     HUDLine Mode{"Mode: ", "Beauty"};
     HUD hud{{4}, &FPS};
 
@@ -53,16 +53,26 @@ struct ExampleApp : SlimApp {
     void OnUpdate(f32 delta_time) override {
         i32 fps = (i32)render_timer.average_frames_per_second;
         FPS.value = fps;
-        FPS.value_color = fps >= 60 ? Green : (fps >= 24 ? Cyan : (fps < 12 ? Red : Yellow));
+        FPS.value_color = fps >= 60 ? Green : (
+            fps >= 24 ? Cyan : (fps < 12 ? Red : Yellow)
+        );
 
-        if (!mouse::is_captured) selection.manipulate(viewport, scene);
-        if (!controls::is_pressed::alt) viewport.updateNavigation(delta_time);
+        if (!mouse::is_captured)
+            selection.manipulate(viewport, scene);
+
+        if (!controls::is_pressed::alt)
+            viewport.updateNavigation(delta_time);
     }
 
     void OnRender() override {
         renderer.render(viewport, true, use_gpu);
-        if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
-        if (hud.enabled) drawHUD(hud, canvas);
+
+        if (controls::is_pressed::alt)
+            drawSelection(selection, viewport, scene);
+
+        if (hud.enabled)
+            drawHUD(hud, canvas);
+
         canvas.drawToWindow();
     }
 

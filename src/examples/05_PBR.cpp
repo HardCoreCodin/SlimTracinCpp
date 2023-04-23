@@ -25,9 +25,9 @@ struct ExampleApp : SlimApp {
 
     // HUD:
     HUDLine FPS {"FPS : "};
-    HUDLine GPU {"GPU : ", "On", "Off",&use_gpu};
-    HUDLine AA  {"AA  : ", "On", "Off",&antialias};
-    HUDLine BVH {"BVH : ", "On", "Off",&draw_BVH};
+    HUDLine GPU {"GPU : ", "Off","On", &use_gpu};
+    HUDLine AA  {"AA  : ", "Off","On", &antialias};
+    HUDLine BVH {"BVH : ", "Off","On", &draw_BVH};
     HUD hud{{4}, &FPS};
 
     // Viewport:
@@ -44,14 +44,10 @@ struct ExampleApp : SlimApp {
 
     Material materials[GRID_SIZE][GRID_SIZE];
     Geometry geometries[GRID_SIZE][GRID_SIZE];
-    SceneCounts counts{OBJECT_COUNT, 1, 4, OBJECT_COUNT, TextureCount};
-    Scene scene{counts, &geometries[0][0], &camera, lights, &materials[0][0], textures, texture_files};
-    Selection selection;
-    RayTracingRenderer renderer{scene,
-                                1,
-                                Cathedral_SkyboxColor,
-                                Cathedral_SkyboxRadiance,
-                                Cathedral_SkyboxIrradiance};
+    Scene scene{{OBJECT_COUNT, 1, 4,
+                          OBJECT_COUNT, TextureCount},
+                &geometries[0][0], &camera, lights,
+                &materials[0][0], textures, texture_files};
 
     ExampleApp() {
         Color plastic{0.04f};
@@ -73,6 +69,13 @@ struct ExampleApp : SlimApp {
         }
         uploadMaterials(scene);
     }
+
+    Selection selection;
+    RayTracingRenderer renderer{scene,1,
+                                Cathedral_SkyboxColor,
+                                Cathedral_SkyboxRadiance,
+                                Cathedral_SkyboxIrradiance};
+
     void OnUpdate(f32 delta_time) override {
         i32 fps = (i32)render_timer.average_frames_per_second;
         FPS.value = fps;
@@ -84,7 +87,7 @@ struct ExampleApp : SlimApp {
 
     void OnRender() override {
         renderer.render(viewport, true, use_gpu);
-        if (draw_BVH) drawBVH(scene.bvh, {}, viewport);
+        if (draw_BVH) drawSceneBVH();
         if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
         if (hud.enabled) drawHUD(hud, canvas);
         canvas.drawToWindow();
@@ -133,6 +136,23 @@ struct ExampleApp : SlimApp {
             os::setWindowCapture(    mouse::is_captured);
             OnMouseButtonDown(mouse_button);
         }
+    }
+
+    void drawSceneBVH() {
+        static Box box;
+        static AABB aabb;
+        for (u32 i = 0; i < scene.counts.geometries; i++) {
+            Geometry &geo{scene.geometries[i]};
+            aabb.max = geo.type == GeometryType_Tet ? TET_MAX : 1.0f;
+            aabb.min = -aabb.max.x;
+            if (geo.type == GeometryType_Quad) {
+                aabb.min.y = -EPS;
+                aabb.max.y = EPS;
+            }
+            box.vertices = aabb;
+            drawBox(box, geo.transform, viewport, BrightYellow, 0.5f);
+        }
+        drawBVH(scene.bvh, {}, viewport, 1, scene.bvh.height);
     }
 };
 

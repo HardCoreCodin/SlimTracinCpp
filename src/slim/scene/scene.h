@@ -158,59 +158,14 @@ struct Scene : SceneData {
     }
 
     void updateAABB(AABB &aabb, const Geometry &geo, u8 sphere_steps = 255) {
-        static QuadVertices quad_vertices;
-        static TetVertices tet_vertices;
-        static BoxVertices box_vertices;
-
-        BoxVertices mesh_vertices;
-
-        vec3 pos, *vertices;
-        u8 vertex_count = 0;
-        aabb.min = INFINITY;
-        aabb.max = -INFINITY;
-
-        switch (geo.type) {
-            case GeometryType_Box   : vertex_count = BOX__VERTEX_COUNT;  vertices = box_vertices.array;  break;
-            case GeometryType_Tet   : vertex_count = TET__VERTEX_COUNT;  vertices = tet_vertices.array;  break;
-            case GeometryType_Quad  : vertex_count = QUAD__VERTEX_COUNT; vertices = quad_vertices.array; break;
-            case GeometryType_Mesh  : vertex_count = BOX__VERTEX_COUNT;  vertices = mesh_vertices.array; mesh_vertices = BoxVertices{meshes[geo.id].aabb}; break;
-            case GeometryType_Sphere: {
-                if (geo.transform.scale.x == geo.transform.scale.y && geo.transform.scale.x == geo.transform.scale.z) {
-                    aabb.min = geo.transform.position - geo.transform.scale;
-                    aabb.max = geo.transform.position + geo.transform.scale;
-                } else {
-                    vec3 center_to_orbit{1.0f, 0.0f, 0.0f};
-                    mat3 rotation{mat3::RotationAroundY(TAU / (f32)sphere_steps)};
-
-                    // Transform vertices positions from local-space to world-space:
-                    for (u8 i = 0; i < sphere_steps; i++) {
-                        center_to_orbit = rotation * center_to_orbit;
-
-                        pos = geo.transform.externPos(center_to_orbit);
-                        aabb.min = minimum(aabb.min, pos);
-                        aabb.max = maximum(aabb.max, pos);
-
-                        pos = geo.transform.externPos({center_to_orbit.x, center_to_orbit.z, 0.0f});
-                        aabb.min = minimum(aabb.min, pos);
-                        aabb.max = maximum(aabb.max, pos);
-
-                        pos = geo.transform.externPos({0.0f, center_to_orbit.x, center_to_orbit.z});
-                        aabb.min = minimum(aabb.min, pos);
-                        aabb.max = maximum(aabb.max, pos);
-                    }
-                }
-            } break;
-            default: return;
+        if (geo.type == GeometryType_Mesh) {
+            aabb = meshes[geo.id].aabb;
+        } else {
+            aabb.max = geo.type == GeometryType_Tet ? TET_MAX : 1.0f;
+            aabb.min = -aabb.max.x;
+            if (geo.type == GeometryType_Quad) aabb.min.y = aabb.max.y = 0.0f;
         }
-
-        if (vertex_count) {
-            // Transform vertices positions from local-space to world-space:
-            for (u8 i = 0; i < vertex_count; i++) {
-                pos = geo.transform.externPos(vertices[i]);
-                aabb.min = minimum(aabb.min, pos);
-                aabb.max = maximum(aabb.max, pos);
-            }
-        }
+        aabb = geo.transform.externAABB(aabb);
     }
 
     void updateAABBs() {
@@ -230,13 +185,13 @@ struct Scene : SceneData {
             bvh_leaf_geometry_indices[i] = bvh_builder->leaf_ids[i];
     }
 
-    INLINE bool castRay(Ray &ray, RayHit &hit, Geometry **hit_geo, Light **hit_light) const {
+    INLINE bool castRay(Ray &ray, RayHit &hit, i32 &hit_geo_id, i32 &hit_light_id) const {
         static Ray local_ray;
         static RayHit local_hit;
         static Transform xform;
         bool found = false;
-        *hit_geo = nullptr;
-        *hit_light = nullptr;
+        hit_geo_id = -1;
+        hit_light_id = -1;
         hit.distance = local_hit.distance = INFINITY;
 
         for (u32 i = 0; i < counts.geometries; i++) {
@@ -248,7 +203,7 @@ struct Scene : SceneData {
             local_ray.localize(ray, xform);
             if (local_ray.hitsDefaultBox(local_hit)) {
                 hit = local_hit;
-                *hit_geo = geometries + i;
+                hit_geo_id = i;
                 found = true;
             }
         }
@@ -268,8 +223,8 @@ struct Scene : SceneData {
                 local_ray.localize(ray, xform);
                 if (local_ray.hitsDefaultSphere(local_hit)) {
                     hit = local_hit;
-                    *hit_geo = nullptr;
-                    *hit_light = lights + i;
+                    hit_geo_id = -1;
+                    hit_light_id = i;
                     found = true;
                 }
             }
@@ -277,8 +232,8 @@ struct Scene : SceneData {
 
         if (found) {
             hit.position = ray[hit.distance];
-            if (*hit_geo)
-            hit.normal = (*hit_geo)->transform.externDir(hit.normal);
+            if (hit_geo_id >= 0)
+                hit.normal = geometries[hit_geo_id].transform.externDir(hit.normal);
         }
 
         return found;

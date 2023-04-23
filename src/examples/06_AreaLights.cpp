@@ -20,13 +20,33 @@ struct ExampleApp : SlimApp {
 
     // HUD:
     HUDLine FPS {"FPS : "};
-    HUDLine GPU {"GPU : ", "On", "Off",&use_gpu};
-    HUDLine AA  {"AA  : ", "On", "Off",&antialias};
-    HUDLine BVH {"BVH : ", "On", "Off",&draw_BVH};
-    HUDLine Cut {"Cut : ", "On", "Off",&cutout};
+    HUDLine GPU {"GPU : ", "Off","On", &use_gpu};
+    HUDLine AA  {"AA  : ", "Off","On", &antialias};
+    HUDLine BVH {"BVH : ", "Off","On", &draw_BVH};
+    HUDLine Cut {"Cut : ", "Off","On", &cutout};
     HUDLine Mode{"Mode: ", "Beauty"};
-    HUDLine Shader{ "Material : "};
+    HUDLine Shader{ "Shader: "};
     HUD hud{{7}, &FPS};
+
+    enum MaterialID { Floor, Rough, Mirror, Emissive1, Emissive2, MaterialCount };
+
+    void updateSelectionInHUD() {
+        const char* shader = "";
+        if (selection.geometry) {
+            Geometry &geo = *selection.geometry;
+            switch (geo.material_id) {
+                case     Floor: shader = "Floor";  break;
+                case     Rough: shader = "Rough";   break;
+                case    Mirror: shader = "Mirror";   break;
+                case Emissive1: shader = "Emissive 1"; break;
+                case Emissive2: shader = "Emissive 2"; break;
+                default: break;
+            }
+        }
+        Shader.value.string.copyFrom(shader, 0);
+
+        selection.changed = false;
+    }
 
     // Viewport:
     Camera camera{{-25 * DEG_TO_RAD, 0, 0}, {-4, 15, -17}}, *cameras{&camera};
@@ -34,17 +54,6 @@ struct ExampleApp : SlimApp {
     Viewport viewport{canvas, &camera};
 
     // Scene:
-    enum MaterialID {
-        Floor_MaterialID,
-
-        Rough_MaterialID,
-        Mirror_MaterialID,
-
-        Emissive1_MaterialID,
-        Emissive2_MaterialID,
-
-        MaterialCount
-    };
 
     u8 flags{MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
     Material floor_material{0.8f, 0.2f, flags,
@@ -71,11 +80,11 @@ struct ExampleApp : SlimApp {
     };
     Material *materials{&floor_material};
 
-    Geometry floor {{{},{       },{40, 1, 40}},GeometryType_Quad,  Floor_MaterialID};
-    Geometry wall1 {{{0.0f, 0.0f, -90.0f * DEG_TO_RAD}, {-12, 10, 5}, {4, 1, 8}}, GeometryType_Quad, Emissive1_MaterialID};
-    Geometry wall2 {{{0.0f, 0.0f, +90.0f * DEG_TO_RAD}, {+15, 5, 5}, {4, 1, 8}}, GeometryType_Quad, Emissive2_MaterialID};
-    Geometry sphere{{{0.0f, 0.0f, -15.0f * DEG_TO_RAD},{-7.5f, 4.5f, 2},{2, 4, 3}},GeometryType_Sphere, Rough_MaterialID};
-    Geometry wall3 {{{0, 0,90*DEG_TO_RAD},{6, 6, 1},{5, 1, 5}},GeometryType_Quad, Mirror_MaterialID};
+    Geometry floor {{{},{       },{40, 1, 40}}, GeometryType_Quad, Floor};
+    Geometry wall1 {{{0.0f, 0.0f, -90.0f * DEG_TO_RAD}, {-12, 10, 5}, {4, 1, 8}}, GeometryType_Quad, Emissive1};
+    Geometry wall2 {{{0.0f, 0.0f, +90.0f * DEG_TO_RAD}, {+15, 5, 5}, {4, 1, 8}}, GeometryType_Quad, Emissive2};
+    Geometry sphere{{{0.0f, 0.0f, -15.0f * DEG_TO_RAD},{-7.5f, 4.5f, 2},{2, 4, 3}}, GeometryType_Sphere, Rough};
+    Geometry wall3 {{{0, 0,90*DEG_TO_RAD},{6, 6, 1},{5, 1, 5}}, GeometryType_Quad, Mirror};
     Geometry *geometries{&floor};
 
     Scene scene{{5,1,0,MaterialCount,TextureCount},
@@ -98,26 +107,9 @@ struct ExampleApp : SlimApp {
         if (!controls::is_pressed::alt) viewport.updateNavigation(delta_time);
     }
 
-    void updateSelectionInHUD() {
-        const char* shader = "";
-        if (selection.geometry) {
-            Geometry &geo = *selection.geometry;
-            switch (geo.material_id) {
-                case Floor_MaterialID: shader = "Floor";  break;
-                case Rough_MaterialID: shader = "Rough";   break;
-                case Emissive1_MaterialID : shader = "Emissive 1"; break;
-                case Emissive2_MaterialID : shader = "Emissive 2"; break;
-                default: break;
-            }
-        }
-        Shader.value.string.copyFrom(shader, 0);
-
-        selection.changed = false;
-    }
-
     void OnRender() override {
         renderer.render(viewport, true, use_gpu);
-        if (draw_BVH) drawBVH(scene.bvh, {}, viewport);
+        if (draw_BVH) drawSceneBVH();
         if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
         if (hud.enabled) drawHUD(hud, canvas);
         canvas.drawToWindow();
@@ -198,6 +190,23 @@ struct ExampleApp : SlimApp {
             os::setWindowCapture(    mouse::is_captured);
             OnMouseButtonDown(mouse_button);
         }
+    }
+
+    void drawSceneBVH() {
+        static Box box;
+        static AABB aabb;
+        for (u32 i = 0; i < scene.counts.geometries; i++) {
+            Geometry &geo{scene.geometries[i]};
+            aabb.max = geo.type == GeometryType_Tet ? TET_MAX : 1.0f;
+            aabb.min = -aabb.max.x;
+            if (geo.type == GeometryType_Quad) {
+                aabb.min.y = -EPS;
+                aabb.max.y = EPS;
+            }
+            box.vertices = aabb;
+            drawBox(box, geo.transform, viewport, BrightYellow, 0.5f);
+        }
+        drawBVH(scene.bvh, {}, viewport, 1, scene.bvh.height);
     }
 };
 

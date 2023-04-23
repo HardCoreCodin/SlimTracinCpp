@@ -1,6 +1,7 @@
 <img src="SlimTracinCpp_logo.png" alt="SlimTracinCPP_logo"><br>
 
 <img src="src/examples/GPU.gif" alt="GPU"><br>
+(Note: For the original SlimTracin 'C' codebase see [SlimTracin](https://github.com/HardCoreCodin/SlimTracin)  
 
 A minimalist and platform-agnostic interactive/real-time raytracer written in C++.<br>
 Strong emphasis on simplicity, ease of use and almost no setup to get started with.<br>  
@@ -11,7 +12,6 @@ Optional GPU support is provided via CUDA.<br>
 The same C++ code is cross-compiled (no CUDA libraries used).<br>
 Compiling using CUDA allows for dynamic toggling between rendering on the CPU or the GPU.<br>
 <img src="src/examples/XPU.gif" alt="XPU">
-<img src="src/examples/XPU.png" alt="XPU" width="540">
 
 Architecture:
 -
@@ -25,68 +25,60 @@ Features:
 -
 All features of <b>SlimEngine++</b> are available here as well.<br>
 Additional features include raytracing facilities:<br>
-- Acceleration Structure (BVH) construction and traversal
-- Intersection shaders for triangular meshes and implicit geometry
-- Debug render modes (Depth, Normal, UV and BVH-preview)
-- Physically based materials (Micro-facet Cook-Torrance BRDF)
 - Raytracing specific shaders (Glass, Mirror, Area lights)
-- Textures (Bi-Linear filtered) with adaptive mip-selection (using ray cones)
+- Physically based materials (Micro-facet Cook-Torrance BRDF)
+- Image Based Lighting (IBL) using Cube Maps for color and irradiance
+- Textures with Bi-Linear filtering
+- Intersection shaders for triangular meshes and implicit geometry
+- Acceleration Structure (BVH) construction and traversal
+- Debug render modes (Depth, Normal, UV and BVH-preview)
+
+<br>
+Textures can be loaded from files for use as albedo or normal maps.<br>
+Texture files are in a format native to the renderer and optimized for filtered sampling.<br>
+Textures are mip-mapped and are sampled with adaptive mip-selection using ray cones:<br><br>
 <img src="src/examples/RayCones.gif" alt="RayCones" width="540"><br>
+<br>
+<br>BVHs can be shown as a wireframe overlay in any render mode.<br>
+<img src="src/examples/07_Meshes_BVH.gif" alt="07_Modes_BVH"><br>
+<br>
+The BVH of the scene updates dynamically as primitives are transformed.<br>
+The BVH of meshes are only built once when a mesh file is first created.<br>
+Mesh primitives can be transformed dynamically because tracing is done in the local space of each primitive.<br>
+
 
 The following example apps demonstrate how to use <b>SlimTracin</b>'s features:<br>
 <i>Note: Each example comes with CMake targets for CPU-only (no CUDA required) or GPU-enabled (requiring CUDA)</i><br>
-* <b><u>Implicit Geometry</b>:</u> Quad, Box, Sphere and Tetrahedra, all with UV-based transparency<br>
-  <img src="src/examples/02_Geometry.gif" alt="02_Geometry"><br>
-  <img src="src/examples/02_Geometry_setup.png" alt="02_Geometry_setup" width="540">
-  <img src="src/examples/02_Geometry_transparency.png" alt="02_Geometry_transparency" width="540">
-* <b><u>Point lights</b>:</u> Can be moved around and scaled (changing their light intensity)<br>
+* <b><u>Point lights</b>:</u> Can be moved around and scaled (changing their light intensity)<br><br>
   <img src="src/examples/01_Lights.gif" alt="01_Lights"><br>
-  <img src="src/examples/01_Lights_setup.png" alt="01_Lights_setup" width="540">
-* <b><u>Area Lights</b>:</u> Emissive quads can be used as rectangular area lights<br>
-  <img src="src/examples/06_AreaLights.gif" alt="06_AreaLights"><br>
-  <p float="left">   
-    <img src="src/examples/06_AreaLights_setup.png" alt="06_AreaLights_setup" width="380">
-    <img src="src/examples/06_AreaLights_selection.png" alt="06_AreaLights_selection" width="360">
-  </p>  
-* <b><u>Classic Materials</b>:</u> Lambert, Blinn, Phong<br>
+  <img src="src/examples/01_Lights_setup.png" alt="01_Lights_setup" width="350">
+* <b><u>Area Lights</b>:</u> Emissive quads can be used as rectangular area lights<br><br>
+  <img src="src/examples/06_AreaLights.gif" alt="06_AreaLights"><br><br>
+  <img src="src/examples/06_AreaLights_setup.png" alt="06_AreaLights_setup" width="300">
+  <img src="src/examples/06_AreaLights_selection.png" alt="06_AreaLights_selection" width="550">
+* <b><u>Implicit Geometry</b>:</u> Quad, Box, Sphere and Tetrahedra, all with UV-based transparency<br><br>
+  <img src="src/examples/02_Geometry.gif" alt="02_Geometry"><br>
+  <img src="src/examples/02_Geometry_setup.png" alt="02_Geometry_setup" width="350">
+  <img src="src/examples/02_Geometry_transparency.png" alt="02_Geometry_transparency" width="500">
+* <b><u>Classic Materials</b>:</u> Lambert, Blinn, Phong<br><br>
   <img src="src/examples/03_BlinnPhong.gif" alt="03_BlinnPhong"><br>
-  <p float="left">
-    <img src="src/examples/03_BlinnPhong_setup.png" alt="03_BlinnPhong_setup" width="360">
-    <img src="src/examples/03_BlinnPhong_selection.png" alt="03_BlinnPhong_selection" width="380">
-  </p>
-* <b><u>PBR Materials</b>:</u> Cook-Torrance BRDF (Schlick/Smith GGX)<br>
+  <img src="src/examples/03_BlinnPhong_selection.png" alt="03_BlinnPhong_selection" width="450">
+  <img src="src/examples/03_BlinnPhong_setup.png" alt="03_BlinnPhong_setup" width="300">
+* <b><u>PBR Materials</b>:</u> Cook-Torrance BRDF (Schlick/Smith GGX)<br><br>
   <img src="src/examples/05_PBR.gif" alt="05_PBR"><br>
-  <img src="src/examples/05_PBR.png" alt="05_PBR" width="540">
-* <b><u>Reflective/Refractive Materials</b>:</u> For glasses and mirrors (bounce count is controlled globally)<br>
+  <img src="src/examples/05_PBR_setup.png" alt="05_PBR" width="600">
+* <b><u>Reflective/Refractive Materials</b>:</u> For glasses and mirrors (bounce count is controlled globally)<br><br>
   <img src="src/examples/04_GlassMirror.gif" alt="04_GlassMirror"><br>
-  <img src="src/examples/04_GlassMirror_WithNormals.gif" alt="04_GlassMirror_Bumpy"><br>
-  <p float="left">   
-    <img src="src/examples/04_GlassMirror_setup.png" alt="04_GlassMirror_setup" width="360">
-    <img src="src/examples/04_GlassMirror_selection.png" alt="04_GlassMirror_selection" width="380">
-  </p>
-* <b><u>Meshes</b>:</u> Transformable and can have smooth shading using vertex normal interpolation<br>
+  <img src="src/examples/04_GlassMirror_setup.png" alt="04_GlassMirror_setup" width="300">
+  <img src="src/examples/04_GlassMirror_selection.png" alt="04_GlassMirror_selection" width="400">
+* <b><u>Meshes</b>:</u> Transformable and can have smooth shading using vertex normal interpolation<br><br>
   <img src="src/examples/07_Meshes.gif" alt="07_Meshes"><br>
-  <p float="left">
-    <img src="src/examples/07_Meshes_setup.png" alt="07_Meshes_setup" width="380">
-    <img src="src/examples/07_Meshes_init.png" alt="07_Meshes_init" width="360">
-  </p>
-  Mesh files are in a format native to the renderer which is optimized for ray/triangle intersection.<br>
-* <b><u>Textures</b>:</u> Albedo, Normal<br>
-  <img src="src/examples/09_Textures.gif" alt="09_Textures"><br>
-  <img src="src/examples/09_Textures.png" alt="09_Textures" width="540"><br>
-  Textures can be loaded from files for use as albedo or normal maps.<br>
-  Texture files are in a format native to the renderer and optimized for filtered sampling.<br> 
-* <b><u>Render Modes</b>:</u> Beauty, Depth, Normals, UVs and BVHs<br>
-  <img src="src/examples/08_Modes.gif" alt="08_Modes"><br>
-  <p float="left">
-    <img src="src/examples/07_Modes_update.png" alt="08_Modes_update" width="380">
-    <img src="src/examples/07_Modes_setup.png" alt="08_Modes_setup" width="360">
-  </p>
-  BVHs can be shown as a wireframe overlay in any render mode.<br>
-  <img src="src/examples/07_Meshes_BVH.gif" alt="08_Modes_BVH"><br>
-  The BVH of the scene updates dynamically as primitives are transformed.<br>
-  The BVH of meshes are only built once when a mesh file is first created.<br>
-  Mesh primitives can be transformed dynamically because tracing is done in the local space of each primitive.<br>
+  <img src="src/examples/07_Meshes_setup.png" alt="07_Meshes_setup" width="700">
+  Mesh files are in a format native to the renderer which is optimized for ray/triangle intersection.<br><br>
+* <b><u>Render Modes</b>:</u> Beauty, Depth, Normals, UVs and BVHs<br><br>
+  <img src="src/examples/07_Modes.gif" alt="07_Modes"><br>
+  <img src="src/examples/07_Modes_setup.png" alt="07_Modes_setup" width="500">
+  <img src="src/examples/07_Modes_update.png" alt="07_Modes_update" width="550">
 
 Converting `.bmp` files to the native `.texture` files can be done with a provided CLI tool:<br>
 `./bmp2texture src.bmp trg.texture [-m] [-w]`<br>

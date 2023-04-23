@@ -20,13 +20,35 @@ struct ExampleApp : SlimApp {
 
     // HUD:
     HUDLine FPS {"FPS : "};
-    HUDLine GPU {"GPU : ", "On", "Off",&use_gpu};
-    HUDLine AA  {"AA  : ", "On", "Off",&antialias};
-    HUDLine BVH {"BVH : ", "On", "Off",&draw_BVH};
+    HUDLine GPU {"GPU : ", "Off","On", &use_gpu};
+    HUDLine AA  {"AA  : ", "Off","On", &antialias};
+    HUDLine BVH {"BVH : ", "Off","On", &draw_BVH};
     HUDLine Mode{"Mode: ", "Beauty"};
     HUDLine Shader{   "Shader   : "};
     HUDLine Roughness{"Roughness: "};
     HUD hud{{7}, &FPS};
+
+    enum MaterialID { Floor, Lambert, Phong, Blinn, MaterialCount };
+
+    void updateSelectionInHUD() {
+        const char* shader = "";
+        if (selection.geometry) {
+            Geometry &geo = *selection.geometry;
+            switch (geo.material_id) {
+                case Floor  : shader = "Floor"; break;
+                case Lambert: shader = "Lambert"; break;
+                case Phong  : shader = "Phong"; break;
+                case Blinn  : shader = "Blinn"; break;
+                default: break;
+            }
+            Roughness.value = materials[geo.material_id].roughness;
+        } else
+            Roughness.value.string.copyFrom("", 0);
+
+        Shader.value.string.copyFrom(shader, 0);
+
+        selection.changed = false;
+    }
 
     // Viewport:
     Camera camera{{-25 * DEG_TO_RAD, 0, 0}, {-4, 15, -17}}, *cameras{&camera};
@@ -39,16 +61,6 @@ struct ExampleApp : SlimApp {
     Light rim_light{ {1.0f, 0.25f, 0.25f}, {5, 8, 15}, 0.9f * 200.0f};
     Light *lights{&key_light};
 
-    enum MaterialID {
-        Floor_MaterialID,
-
-        Lambert_MaterialID,
-        Phong_MaterialID,
-        Blinn_MaterialID,
-
-        MaterialCount
-    };
-
     u8 flags{MATERIAL_HAS_NORMAL_MAP | MATERIAL_HAS_ALBEDO_MAP};
     Material floor_material{0.8f, 0.2f, flags,
                             2, {Floor_Albedo, Floor_Normal}};
@@ -60,10 +72,10 @@ struct ExampleApp : SlimApp {
                    BRDF_Blinn, 0.75f, 0.25f, 0.0f, 1.0f, {1.0f, 0.4f, 1.0f}};
     Material *materials{&floor_material};
 
-    Geometry floor {{{},{       },{40, 1, 40}},GeometryType_Quad,  Floor_MaterialID};
-    Geometry box{   {{},{-9, 8, -2},{2, 2, 3}},GeometryType_Box,   Lambert_MaterialID};
-    Geometry tet{   {{},{-3, 6, 14},{4, 3, 4}},GeometryType_Tet,   Phong_MaterialID};
-    Geometry sphere{{{},{3, 6, 2  },{4, 3, 3}},GeometryType_Sphere,Blinn_MaterialID};
+    Geometry floor {{{},{       },{40, 1, 40}}, GeometryType_Quad, Floor};
+    Geometry box{{{},{-9, 8, -2},{2, 2, 3}}, GeometryType_Box, Lambert};
+    Geometry tet{{{},{-3, 6, 14},{4, 3, 4}}, GeometryType_Tet, Phong};
+    Geometry sphere{{{},{3, 6, 2  },{4, 3, 3}}, GeometryType_Sphere, Blinn};
     Geometry *geometries{&floor};
 
     Scene scene{{4,1,3,MaterialCount,TextureCount},
@@ -95,32 +107,9 @@ struct ExampleApp : SlimApp {
         }
     }
 
-    void updateSelectionInHUD() {
-        const char* shader = "";
-        if (selection.geometry) {
-            Geometry &geo = *selection.geometry;
-            switch (geo.material_id) {
-                case Blinn_MaterialID: shader = "Blinn"; break;
-                case Phong_MaterialID: shader = "Phong"; break;
-                default:               shader = "Lambert"; break;
-            }
-            Roughness.value = materials[geo.material_id].roughness;
-        } else
-            Roughness.value.string.copyFrom("", 0);
-
-        Shader.value.string.copyFrom(shader, 0);
-
-        selection.changed = false;
-    }
-
     void OnRender() override {
         renderer.render(viewport, true, use_gpu);
-        if (draw_BVH) {
-            for (u32 i = 0; i < scene.counts.geometries; i++)
-                if (geometries[i].type == GeometryType_Mesh)
-                    drawBVH(scene.meshes[geometries[i].id].bvh, geometries[i].transform, viewport);
-            drawBVH(scene.bvh, {}, viewport);
-        }
+        if (draw_BVH) drawSceneBVH();
         if (controls::is_pressed::alt) drawSelection(selection, viewport, scene);
         if (hud.enabled) drawHUD(hud, canvas);
         canvas.drawToWindow();
@@ -197,6 +186,23 @@ struct ExampleApp : SlimApp {
             os::setWindowCapture(    mouse::is_captured);
             OnMouseButtonDown(mouse_button);
         }
+    }
+
+    void drawSceneBVH() {
+        static Box box;
+        static AABB aabb;
+        for (u32 i = 0; i < scene.counts.geometries; i++) {
+            Geometry &geo{scene.geometries[i]};
+            aabb.max = geo.type == GeometryType_Tet ? TET_MAX : 1.0f;
+            aabb.min = -aabb.max.x;
+            if (geo.type == GeometryType_Quad) {
+                aabb.min.y = -EPS;
+                aabb.max.y = EPS;
+            }
+            box.vertices = aabb;
+            drawBox(box, geo.transform, viewport, BrightYellow, 0.5f);
+        }
+        drawBVH(scene.bvh, {}, viewport, 1, scene.bvh.height);
     }
 };
 

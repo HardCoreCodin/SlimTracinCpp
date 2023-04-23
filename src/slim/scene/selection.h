@@ -35,22 +35,24 @@ struct Selection {
         ray.origin = camera.position;
         ray.direction = camera.getRayDirectionAt(x, y, dimensions.width_over_height, normalization_factor);
         hit.distance = local_ray_hit.distance = INFINITY;
-        Geometry *hit_geo = nullptr;
-        Light *hit_light = nullptr;
+        i32 hit_geo_id = -1;
+        i32 hit_light_id = -1;
 
         if (mouse::left_button.is_pressed && !left_mouse_button_was_pressed && !controls::is_pressed::alt) {
             // This is the first frame after the left mouse button went down:
             // Cast a ray onto the scene to find the closest object behind the hovered pixel:
-            if (scene.castRay(ray, hit, &hit_geo, &hit_light)) {
+
+            if (scene.castRay(ray, hit, hit_geo_id, hit_light_id)) {
                 // Track the object that is now selected and Detect if object scene->selection has changed:
-                if (hit_light) {
-                    changed = light != hit_light;
-                    light = hit_light;
-                    world_position = &hit_light->position_or_direction;
+                if (hit_light_id >= 0) {
+                    changed = light != (scene.lights + hit_light_id);
                     geometry = nullptr;
+                    light = scene.lights + hit_light_id;
+                    world_position = &light->position_or_direction;
                 } else {
-                    changed = geometry != hit_geo;
-                    geometry = hit_geo;
+                    changed = geometry != (scene.geometries + hit_geo_id);
+                    light = nullptr;
+                    geometry = scene.geometries + hit_geo_id;
                     world_position = &geometry->transform.position;
                 }
 
