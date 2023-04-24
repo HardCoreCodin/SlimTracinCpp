@@ -5,8 +5,13 @@
 #include "./bvh.h"
 
 
-u32 getSizeInBytes(const Mesh &mesh) {
+u32 getSizeInBytes(const Mesh &mesh, u32 *bvh_nodes_size = nullptr) {
     u32 memory_size = getSizeInBytes(mesh.bvh);
+    if (bvh_nodes_size) {
+        *bvh_nodes_size += memory_size;
+        memory_size = 0;
+    }
+
     memory_size += sizeof(Triangle) * mesh.triangle_count;
     memory_size += sizeof(vec3) * mesh.vertex_count;
     memory_size += sizeof(TriangleVertexIndices) * mesh.triangle_count;
@@ -24,9 +29,15 @@ u32 getSizeInBytes(const Mesh &mesh) {
     return memory_size;
 }
 
-bool allocateMemory(Mesh &mesh, memory::MonotonicAllocator *memory_allocator) {
-    if (getSizeInBytes(mesh) > (memory_allocator->capacity - memory_allocator->occupied)) return false;
-    allocateMemory(mesh.bvh, memory_allocator);
+bool allocateMemory(Mesh &mesh, memory::MonotonicAllocator *memory_allocator, memory::MonotonicAllocator *memory_allocator_for_bvh_nodes = nullptr) {
+    if (memory_allocator_for_bvh_nodes) {
+        u32 bvh_nodes_size;
+        if (getSizeInBytes(mesh, &bvh_nodes_size) > (memory_allocator->capacity - memory_allocator->occupied)) return false;
+        allocateMemory(mesh.bvh, memory_allocator_for_bvh_nodes);
+    } else {
+        if (getSizeInBytes(mesh) > (memory_allocator->capacity - memory_allocator->occupied)) return false;
+        allocateMemory(mesh.bvh, memory_allocator);
+    }
     mesh.triangles               = (Triangle*             )memory_allocator->allocate(sizeof(Triangle)              * mesh.triangle_count);
     mesh.vertex_positions        = (vec3*                 )memory_allocator->allocate(sizeof(vec3)                  * mesh.vertex_count);
     mesh.vertex_position_indices = (TriangleVertexIndices*)memory_allocator->allocate(sizeof(TriangleVertexIndices) * mesh.triangle_count);
@@ -135,28 +146,30 @@ bool save(const Mesh &mesh, char* file_path) {
     return true;
 }
 
-bool load(Mesh &mesh, char *file_path, memory::MonotonicAllocator *memory_allocator = nullptr) {
+bool load(Mesh &mesh, char *file_path,
+          memory::MonotonicAllocator *memory_allocator = nullptr,
+          memory::MonotonicAllocator *memory_allocator_for_bvh_nodes = nullptr) {
     void *file = os::openFileForReading(file_path);
     if (!file) return false;
 
     if (memory_allocator) {
         mesh = Mesh{};
         readHeader(mesh, file);
-        if (!allocateMemory(mesh, memory_allocator)) return false;
+        if (!allocateMemory(mesh, memory_allocator, memory_allocator_for_bvh_nodes)) return false;
     } else if (!mesh.vertex_positions) return false;
     readContent(mesh, file);
     os::closeFile(file);
     return true;
 }
 
-u32 getTotalMemoryForMeshes(String *mesh_files, u32 mesh_count, u32 *max_triangle_count = nullptr) {
+u32 getTotalMemoryForMeshes(String *mesh_files, u32 mesh_count, u32 *max_triangle_count = nullptr, u32 *bvh_nodes_size = nullptr) {
     u32 memory_size = 0;
     if (max_triangle_count) *max_triangle_count = 0;
     for (u32 i = 0; i < mesh_count; i++) {
         Mesh mesh;
         loadHeader(mesh, mesh_files[i].char_ptr);
         if (max_triangle_count) *max_triangle_count = Max(*max_triangle_count, mesh.triangle_count);
-        memory_size += getSizeInBytes(mesh);
+        memory_size += getSizeInBytes(mesh, bvh_nodes_size);
     }
 
     return memory_size;

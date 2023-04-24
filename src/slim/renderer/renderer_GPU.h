@@ -1,7 +1,7 @@
 #pragma once
 
-#include "./tracers/ray_tracer.h"
-#include "./shaders/surface_shader.h"
+#include "ray_tracer.h"
+#include "surface_shader.h"
 
 
 #define USE_GPU_BY_DEFAULT true

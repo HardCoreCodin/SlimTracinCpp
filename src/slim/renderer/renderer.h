@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../viewport/viewport.h"
-#include "./tracers/ray_tracer.h"
-#include "./shaders/surface_shader.h"
+#include "ray_tracer.h"
+#include "surface_shader.h"
 
 #ifdef __CUDACC__
 #include "./renderer_GPU.h"
@@ -32,9 +32,6 @@ struct RayTracingRenderer {
                                 char skybox_color_texture_id = -1,
                                 char skybox_radiance_texture_id = -1,
                                 char skybox_irradiance_texture_id = -1,
-                                f32 skybox_color_intensity = 1.0f,
-                                f32 skybox_radiance_intensity = 1.0f,
-                                f32 skybox_irradiance_intensity = 1.0f,
                                 RenderMode render_mode = RAY_TRACER_DEFAULT_SETTINGS_RENDER_MODE,
                                 memory::MonotonicAllocator *memory_allocator = nullptr) :
               scene{scene}, ray_tracer{scene.counts.geometries, scene.mesh_stack_size, memory_allocator} {
@@ -42,9 +39,6 @@ struct RayTracingRenderer {
         settings.skybox_color_texture_id = skybox_color_texture_id;
         settings.skybox_radiance_texture_id = skybox_radiance_texture_id;
         settings.skybox_irradiance_texture_id = skybox_irradiance_texture_id;
-        settings.skybox_color_intensity = skybox_color_intensity;
-        settings.skybox_radiance_intensity = skybox_radiance_intensity;
-        settings.skybox_irradiance_intensity = skybox_irradiance_intensity;
         settings.max_depth = max_depth;
         settings.render_mode = render_mode;
         settings.mip_level_colors[0] = BrightRed;

@@ -310,3 +310,25 @@ struct Ray {
         return found_triangle;
     }
 };
+
+struct SphereTracer {
+    f32 b, c, t_near, t_far, t_max;
+
+    INLINE_XPU bool hit(const vec3 &center, f32 one_over_radius, const vec3 &Ro, const vec3 &Rd, f32 max_distance) {
+        t_max = max_distance * one_over_radius;
+        vec3 rc{(center - Ro) * one_over_radius};
+
+        b = Rd.dot(rc);
+        c = rc.squaredLength() - 1;
+        f32 h = b*b - c;
+
+        if (h < 0)
+            return false;
+
+        h = sqrtf(h);
+        t_near = b - h;
+        t_far  = b + h;
+
+        return t_far > 0 && t_near < t_max;
+    }
+};

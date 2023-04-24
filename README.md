@@ -1,16 +1,16 @@
 <img src="SlimTracinCpp_logo.png" alt="SlimTracinCPP_logo"><br>
 
 <img src="src/examples/GPU.gif" alt="GPU"><br>
-(Note: For the original SlimTracin 'C' codebase see [SlimTracin](https://github.com/HardCoreCodin/SlimTracin)  
 
 A minimalist and platform-agnostic interactive/real-time raytracer written in C++.<br>
-Strong emphasis on simplicity, ease of use and almost no setup to get started with.<br>  
+Strong emphasis on simplicity, ease of use and almost no setup to get started with.<br>
+<i>(Note: For the original SlimTracin 'C' codebase see [SlimTracin](https://github.com/HardCoreCodin/SlimTracin) )</i>
 
 This project extends [SlimEngine++](https://github.com/HardCoreCodin/SlimEngineCpp).
 
 Optional GPU support is provided via CUDA.<br>
 The same C++ code is cross-compiled (no CUDA libraries used).<br>
-Compiling using CUDA allows for dynamic toggling between rendering on the CPU or the GPU.<br>
+Compiling using CUDA allows for dynamic toggling between rendering on the CPU or the GPU.<br><br>
 <img src="src/examples/XPU.gif" alt="XPU">
 
 Architecture:
@@ -28,7 +28,7 @@ Additional features include raytracing facilities:<br>
 - Raytracing specific shaders (Glass, Mirror, Area lights)
 - Physically based materials (Micro-facet Cook-Torrance BRDF)
 - Image Based Lighting (IBL) using Cube Maps for color and irradiance
-- Textures with Bi-Linear filtering
+- Textures with Bi-Linear filtered Sampling
 - Intersection shaders for triangular meshes and implicit geometry
 - Acceleration Structure (BVH) construction and traversal
 - Debug render modes (Depth, Normal, UV and BVH-preview)
@@ -44,6 +44,7 @@ Textures are mip-mapped and are sampled with adaptive mip-selection using ray co
 <br>
 The BVH of the scene updates dynamically as primitives are transformed.<br>
 The BVH of meshes are only built once when a mesh file is first created.<br>
+<br>
 Mesh primitives can be transformed dynamically because tracing is done in the local space of each primitive.<br>
 
 
@@ -75,16 +76,22 @@ The following example apps demonstrate how to use <b>SlimTracin</b>'s features:<
   <img src="src/examples/07_Meshes.gif" alt="07_Meshes"><br>
   <img src="src/examples/07_Meshes_setup.png" alt="07_Meshes_setup" width="700">
   Mesh files are in a format native to the renderer which is optimized for ray/triangle intersection.<br><br>
-* <b><u>Render Modes</b>:</u> Beauty, Depth, Normals, UVs and BVHs<br><br>
+* <b><u>Render Modes</b>:</u> Beauty, Depth, Vertex Normals, Normal Maps, UVs and Mip-Levels<br><br>
   <img src="src/examples/07_Modes.gif" alt="07_Modes"><br>
   <img src="src/examples/07_Modes_setup.png" alt="07_Modes_setup" width="500">
   <img src="src/examples/07_Modes_update.png" alt="07_Modes_update" width="550">
 
 Converting `.bmp` files to the native `.texture` files can be done with a provided CLI tool:<br>
 `./bmp2texture src.bmp trg.texture [-m] [-w]`<br>
--m : Generate mip-maps<br>
--w : Wrap-around<br>
-
+-c : Cube map<br>
+-f : Flip vertically
+-l : Linear (no gamma correction)<br>
+-m : Mipmap<br>
+-n : Normal map (XY -> Z)<br>
+-t : Tile<br>
+-w : Wrap<br>
+<br>
+<br>
 Converting `.obj` files to the native `.mesh` files can be done with a provided CLI tool:<br>
 `./obj2mesh src.obj trg.mesh [-i]`<br>
 -i : Invert triangle winding order (CW to CCW)<br>

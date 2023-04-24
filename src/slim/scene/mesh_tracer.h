@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../../core/ray.h"
-#include "../../scene/mesh.h"
+#include "./mesh.h"
+#include "../core/ray.h"
 
 struct MeshTracer {
     u32 *stack = nullptr;

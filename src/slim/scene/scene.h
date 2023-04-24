@@ -61,7 +61,8 @@ struct Scene : SceneData {
           Texture *textures = nullptr, String *texture_files = nullptr,
           Mesh *meshes = nullptr, String *mesh_files = nullptr,
           Grid *grids = nullptr, Box *boxes = nullptr, Tet *tets = nullptr, Quad *quads = nullptr, Curve *curves = nullptr,
-          SceneIO *scene_io = nullptr, memory::MonotonicAllocator *memory_allocator = nullptr
+          SceneIO *scene_io = nullptr,
+          memory::MonotonicAllocator *memory_allocator = nullptr
     ) : SceneData{counts, 0, 0,
                   geometries, cameras, lights, materials, textures, meshes, grids, boxes, tets, quads, curves}
     {
@@ -69,7 +70,8 @@ struct Scene : SceneData {
         bvh.height = (u8)counts.geometries;
 
         memory::MonotonicAllocator temp_allocator;
-        u32 capacity = sizeof(BVHBuilder) + (sizeof(u32) + sizeof(AABB) + sizeof(RectI)) * counts.geometries + sizeof(BVHNode) * bvh.node_count;
+        u32 capacity = sizeof(BVHBuilder) + (sizeof(u32) + sizeof(AABB) + sizeof(RectI)) * counts.geometries;
+        u32 bvh_nodes_capacity = sizeof(BVHNode) * bvh.node_count;
 
         if (counts.lights && !lights) capacity += sizeof(Material) * counts.lights;
         if (counts.materials && !materials) capacity += sizeof(Material) * counts.materials;
@@ -86,18 +88,21 @@ struct Scene : SceneData {
         u32 max_triangle_count = 0;
         if (counts.meshes) {
             if (!meshes) capacity += sizeof(Mesh) * counts.meshes;
-            capacity += getTotalMemoryForMeshes(mesh_files, counts.meshes, &max_triangle_count);
+            capacity += getTotalMemoryForMeshes(mesh_files, counts.meshes, &max_triangle_count, &bvh_nodes_capacity);
             capacity += sizeof(u32) * (2 * counts.meshes);
         }
         u32 max_leaf_node_count = Max(max_triangle_count, counts.geometries);
         capacity += BVHBuilder::getSizeInBytes(max_leaf_node_count);
 
         if (!memory_allocator) {
-            temp_allocator = memory::MonotonicAllocator{capacity};
+            temp_allocator = memory::MonotonicAllocator{bvh_nodes_capacity + capacity};
             memory_allocator = &temp_allocator;
         }
+        memory::MonotonicAllocator bvh_nodes_allocator;
+        bvh_nodes_allocator.address = (u8*)memory_allocator->allocate(bvh_nodes_capacity);
+        bvh_nodes_allocator.capacity = (u64)bvh_nodes_capacity;
 
-        bvh.nodes = (BVHNode*)memory_allocator->allocate(sizeof(BVHNode) * bvh.node_count);
+        bvh.nodes = (BVHNode*)bvh_nodes_allocator.allocate(sizeof(BVHNode) * bvh.node_count);
         bvh_leaf_geometry_indices = (u32*)memory_allocator->allocate(sizeof(u32) * counts.geometries);
         bvh_builder = (BVHBuilder*)memory_allocator->allocate(sizeof(BVHBuilder));
         *bvh_builder = BVHBuilder{max_leaf_node_count, memory_allocator};
@@ -142,7 +147,7 @@ struct Scene : SceneData {
             for (u32 i = 0; i < counts.meshes; i++) meshes[i] = Mesh{};
 
             for (u32 i = 0; i < counts.meshes; i++) {
-                load(meshes[i], mesh_files[i].char_ptr, memory_allocator);
+                load(meshes[i], mesh_files[i].char_ptr, memory_allocator, &bvh_nodes_allocator);
                 mesh_stack_size = Max(mesh_stack_size, meshes[i].bvh.height);
             }
             mesh_stack_size += 2;
@@ -183,59 +188,5 @@ struct Scene : SceneData {
 
         for (u32 i = 0; i < counts.geometries; i++)
             bvh_leaf_geometry_indices[i] = bvh_builder->leaf_ids[i];
-    }
-
-    INLINE bool castRay(Ray &ray, RayHit &hit, i32 &hit_geo_id, i32 &hit_light_id) const {
-        static Ray local_ray;
-        static RayHit local_hit;
-        static Transform xform;
-        bool found = false;
-        hit_geo_id = -1;
-        hit_light_id = -1;
-        hit.distance = local_hit.distance = INFINITY;
-
-        for (u32 i = 0; i < counts.geometries; i++) {
-            Geometry &geo = geometries[i];
-            xform = geo.transform;
-            if (geo.type == GeometryType_Mesh)
-                xform.scale *= meshes[geo.id].aabb.max;
-
-            local_ray.localize(ray, xform);
-            if (local_ray.hitsDefaultBox(local_hit)) {
-                hit = local_hit;
-                hit_geo_id = i;
-                found = true;
-            }
-        }
-
-        if (lights) {
-            for (u32 i = 0; i < counts.lights; i++) {
-                Light &light = lights[i];
-                if (light.flags & Light_IsDirectional)
-                    continue;
-
-                f32 light_radius = light.intensity * (1.0f / (8.0f * 16.0f));
-                xform.position = light.position_or_direction;
-                xform.scale = light_radius;
-                xform.orientation.reset();
-
-                local_hit.distance = INFINITY;
-                local_ray.localize(ray, xform);
-                if (local_ray.hitsDefaultSphere(local_hit)) {
-                    hit = local_hit;
-                    hit_geo_id = -1;
-                    hit_light_id = i;
-                    found = true;
-                }
-            }
-        }
-
-        if (found) {
-            hit.position = ray[hit.distance];
-            if (hit_geo_id >= 0)
-                hit.normal = geometries[hit_geo_id].transform.externDir(hit.normal);
-        }
-
-        return found;
     }
 };

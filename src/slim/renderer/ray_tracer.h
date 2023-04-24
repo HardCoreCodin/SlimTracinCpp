@@ -1,9 +1,8 @@
 #pragma once
 
-#include "../../viewport/viewport.h"
-#include "../shaders/surface_shader.h"
-//
-////#include "./SSB.h"
+#include "../viewport/viewport.h"
+#include "./surface_shader.h"
+
 //#define RAY_TRACER_DEFAULT_SETTINGS_MAX_DEPTH 3
 //#define RAY_TRACER_DEFAULT_SETTINGS_RENDER_MODE RenderMode_Beauty
 
@@ -13,9 +12,6 @@ struct RayTracerSettings {
     char skybox_color_texture_id;
     char skybox_radiance_texture_id;
     char skybox_irradiance_texture_id;
-    f32 skybox_color_intensity;
-    f32 skybox_radiance_intensity;
-    f32 skybox_irradiance_intensity;
     RenderMode render_mode;
     ColorID mip_level_colors[9];
 };
@@ -54,10 +50,11 @@ struct RayTracerProjection {
 
 struct RayTracer {
     SceneTracer scene_tracer;
-    LightsShader lights_shader;
+    SphereTracer sphereTracer;
     SurfaceShader surface;
     Ray ray;
     RayHit hit;
+
     vec2 screen_center_to_pixel_center;
     f32 z_depth;
 
@@ -81,7 +78,6 @@ struct RayTracer {
                 screen_center_to_pixel_center.squaredLength() +
                     projection.squared_distance_to_projection_plane
             );
-            scene_tracer.finalizeHit(surface.geometry, scene.materials, ray, hit);
             surface.prepareForShading(ray, hit, scene.materials, scene.textures);
             z_depth = projection.getDepthAt(hit.position);
             if (render_beauty) {
@@ -104,11 +100,9 @@ struct RayTracer {
                         ray.direction.x,
                         ray.direction.y,
                         ray.direction.z
-                    ).color * settings.skybox_color_intensity;
+                    ).color;
 
-                lights_shader.shadeLights(scene.lights, scene.counts.lights,
-                                          projection.camera_position, ray.direction,
-                                          INFINITY, color);
+                shadeLights(scene.lights, scene.counts.lights, projection.camera_position, ray.direction, INFINITY, color);
             }
             if (color.r != 0.0f ||
                 color.g != 0.0f ||
@@ -117,15 +111,34 @@ struct RayTracer {
         }
     }
 
-    INLINE_XPU Color cubemapColor(const vec3 &direction, const Texture &texture) {
-        return texture.sampleCube(direction.x,direction.y,direction.z).color;
+    INLINE_XPU bool shadeLights(const Light *lights, const u32 light_count, const vec3 &Ro, const vec3 &Rd, f32 max_distance, Color &color) {
+        bool hit_light = false;
+        f32 t1, t2, density;
+
+        for (u32 i = 0; i < light_count; i++) {
+            const Light &light = lights[i];
+
+            if (sphereTracer.hit(light.position_or_direction, 64.0f / light.intensity, Ro, Rd, max_distance)) {
+                // Integrate density along the ray's traced path through the spherical volume::
+                t1 = Max(sphereTracer.t_near, 0);
+                t2 = Min(sphereTracer.t_far, sphereTracer.t_max);
+                density = (
+                    sphereTracer.c*t1 - sphereTracer.b*t1*t1 + t1*t1*t1/3.0f - (
+                    sphereTracer.c*t2 - sphereTracer.b*t2*t2 + t2*t2*t2/3.0f   )
+                ) * (3.0f / 4.0f);
+                color = light.color.scaleAdd(  pow(density, 8.0f) * 4, color);
+                hit_light = true;
+            }
+        }
+
+        return hit_light;
     }
 
     INLINE_XPU void shadePixel(const Scene &scene, const RayTracerSettings &settings, Color &color) {
         Color current_color;
         Color throughput = 1.0f;
         u32 depth_left = settings.max_depth;
-        ray.depth = scene_tracer.shadow_ray.depth = scene_tracer.aux_ray.depth = 1;
+        ray.depth = scene_tracer.aux_ray.depth = 1;
 
         while (depth_left) {
             current_color = Black;
@@ -135,50 +148,36 @@ struct RayTracer {
 
             if (scene.flags & SCENE_HAD_EMISSIVE_QUADS &&
                 surface.geometry != (scene.geometries + 4))
-                surface.shadeFromEmissiveQuads(scene, scene_tracer.aux_ray, scene_tracer.aux_hit, current_color);
+                surface.shadeFromEmissiveQuads(scene, current_color);
 
             if (settings.skybox_irradiance_texture_id >= 0 &&
                 settings.skybox_radiance_texture_id >= 0) {
                 surface.L = surface.N;
                 surface.NdotL = 1.0f;
-                Color D{cubemapColor(surface.N, scene.textures[settings.skybox_irradiance_texture_id])};
-                Color S{cubemapColor(surface.R, scene.textures[settings.skybox_radiance_texture_id])};
+                Color D{scene.textures[settings.skybox_irradiance_texture_id].sampleCube(surface.N.x,surface.N.y,surface.N.z).color};
+                Color S{scene.textures[settings.skybox_radiance_texture_id  ].sampleCube(surface.R.x,surface.R.y,surface.R.z).color};
                 surface.radianceFraction();
                 current_color = D.mulAdd(surface.Fd, surface.Fs.mulAdd(S, current_color));
             }
 
             color = current_color.mulAdd(throughput, color);
             if (scene.lights)
-                lights_shader.shadeLights(scene.lights, scene.counts.lights, ray.origin, ray.direction, hit.distance, color);
+                shadeLights(scene.lights, scene.counts.lights, ray.origin, ray.direction, hit.distance, color);
 
             if ((surface.material->isReflective() ||
                  surface.material->isRefractive()) &&
                 --depth_left) {
                 ray.depth++;
                 scene_tracer.aux_ray.depth++;
-                scene_tracer.shadow_ray.depth++;
-                vec3 &next_ray_direction{surface.material->isRefractive() ? surface.RF : surface.R};
 
-                Color next_ray_throughput{White};
-                surface.refracted = surface.refracted && surface.material->isRefractive();
-                if (surface.material->brdf == BRDF_CookTorrance) {
-                    surface.F = schlickFresnel(clampedValue(surface.N.dot(surface.R)), surface.material->reflectivity);
-
-                    if (surface.refracted)
-                        next_ray_throughput -= surface.F;
-                    else
-                        next_ray_throughput = surface.F;
-                } else {
-                    if (surface.refracted)
-                        next_ray_throughput = surface.material->reflectivity;
-                    else
-                        next_ray_throughput -= surface.material->reflectivity;
-                }
-                throughput *= next_ray_throughput;
+//                surface.H = (surface.R + surface.V).normalized();
+//                surface.F = schlickFresnel(clampedValue(surface.H.dot(surface.R)), surface.material->reflectivity);
+                surface.F = schlickFresnel(clampedValue(surface.N.dot(surface.R)), surface.material->reflectivity);
+                throughput *= surface.refracted ? (1.0f - surface.F) : surface.F;
 
                 ray.origin = hit.position;
-                ray.direction = next_ray_direction;
-                surface.geometry = scene_tracer.findClosestGeometry(ray, hit, scene);
+                ray.direction = surface.RF;
+                surface.geometry = scene_tracer.trace(ray, hit, scene);
                 if (surface.geometry) {
                     surface.prepareForShading(ray, hit, scene.materials, scene.textures);
                     if (surface.geometry->type == GeometryType_Quad && surface.material->isEmissive()) {
@@ -188,7 +187,7 @@ struct RayTracer {
 
                     continue;
                 } else if (settings.skybox_color_texture_id >= 0)
-                    color = cubemapColor(ray.direction, scene.textures[settings.skybox_color_texture_id]).mulAdd(throughput, color);
+                    color = scene.textures[settings.skybox_color_texture_id].sampleCube(ray.direction.x,ray.direction.y,ray.direction.z).color;
             }
 
             break;

@@ -1,14 +1,13 @@
 #pragma once
 
-#include "mesh_tracer.h"
-#include "../../scene/scene.h"
+#include "./scene.h"
+#include "./mesh_tracer.h"
 
 struct SceneTracer {
     MeshTracer mesh_tracer{nullptr};
     u32 *stack = nullptr;
-
-    Ray shadow_ray, aux_ray;
-    RayHit shadow_hit, aux_hit;
+    Ray aux_ray;
+    RayHit aux_hit;
 
     INLINE_XPU SceneTracer(u32 *stack, u32 *mesh_stack) : mesh_tracer{mesh_stack}, stack{stack} {}
 
@@ -21,69 +20,6 @@ struct SceneTracer {
 
         stack = (u32*)memory_allocator->allocate(sizeof(u32) * stack_size);
         mesh_tracer = MeshTracer{mesh_stack_size, memory_allocator};
-    }
-
-    INLINE_XPU bool inShadow(const Scene &scene, const vec3 &origin, const vec3 &direction, float max_distance = INFINITY) {
-        shadow_ray.origin = origin;
-        shadow_ray.direction = direction;
-        return trace(shadow_ray, shadow_hit, scene, true, max_distance);
-    }
-
-    INLINE_XPU Geometry* findClosestGeometry(Ray &ray, RayHit &hit, const Scene &scene) {
-        Geometry *closest_geometry = trace(ray, hit, scene);
-        if (closest_geometry) finalizeHit(closest_geometry, scene.materials, ray, hit);
-        return closest_geometry;
-    }
-
-    INLINE_XPU bool hitGeometryInLocalSpace(const Geometry &geo, const Mesh *meshes, const Ray &ray, RayHit &hit, bool any_hit = false) {
-        aux_ray.localize(ray, geo.transform);
-        aux_ray.pixel_coords = ray.pixel_coords;
-        aux_ray.depth = ray.depth;
-        f32 n, f;
-        AABB aabb;
-
-        if (geo.type == GeometryType_Mesh) {
-            aabb = meshes[geo.id].aabb;
-        } else {
-            aabb.max = geo.type == GeometryType_Tet ? TET_MAX : 1.0f;
-            aabb.min = -aabb.max.x;
-            if (geo.type == GeometryType_Quad) {
-                aabb.min.y = -EPS;
-                aabb.max.y = EPS;
-            }
-        }
-        if (!aux_ray.hitsAABB(aabb, n, f)) return false;
-
-        switch (geo.type) {
-            case GeometryType_Quad: return aux_ray.hitsDefaultQuad(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
-            case GeometryType_Box: return aux_ray.hitsDefaultBox(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
-            case GeometryType_Sphere: return aux_ray.hitsDefaultSphere(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
-            case GeometryType_Tet   : return aux_ray.hitsDefaultTetrahedron(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
-            case GeometryType_Mesh  : return mesh_tracer.trace(meshes[geo.id], aux_ray, hit, any_hit);
-            default: return false;
-        }
-    }
-
-    INLINE_XPU void finalizeHit(Geometry *geometry, const Material *materials, Ray &ray, RayHit &hit) {
-        const vec2 &uv_repeat{materials[geometry->material_id].uv_repeat};
-        hit.uv *= uv_repeat;
-        if (hit.from_behind) hit.normal = -hit.normal;
-
-        // Compute uvs and uv-coverage using Ray Cones:
-        // Note: This is done while the hit is still in LOCAL space and using its LOCAL and PRE-NORMALIZED ray direction
-        hit.cone_width = hit.distance * hit.scaling_factor;
-        hit.cone_width *= hit.cone_width;
-        hit.cone_width *= hit.cone_width;
-        hit.uv_coverage *= hit.cone_width / (
-            uv_repeat.u *
-            uv_repeat.v *
-            hit.NdotRd *
-            abs((1.0f - hit.normal).dot(geometry->transform.scale))
-        );
-
-        // Convert Ray Hit to world space, using the "t" value from the local-space ray_tracer:
-        hit.position = ray[hit.distance];
-        hit.normal = geometry->transform.externDir(hit.normal); // Normalized
     }
 
     XPU Geometry* trace(Ray &ray, RayHit &hit, const Scene &scene, bool any_hit = false, f32 max_distance = INFINITY) {
@@ -164,7 +100,7 @@ struct SceneTracer {
         Geometry *geo, *hit_geo = nullptr;
         u8 visibility_flag = any_hit ? GEOMETRY_IS_SHADOWING : GEOMETRY_IS_VISIBLE;
 
-        aux_hit.distance = hit.distance;
+        aux_hit.distance = Min(closest_distance + EPS, hit.distance);
 
         for (u32 i = 0; i < geo_count; i++) {
             geo = scene.geometries + geometry_indices[i];
@@ -185,5 +121,34 @@ struct SceneTracer {
         }
 
         return hit_geo;
+    }
+
+    INLINE_XPU bool hitGeometryInLocalSpace(const Geometry &geo, const Mesh *meshes, const Ray &ray, RayHit &hit, bool any_hit = false) {
+        aux_ray.localize(ray, geo.transform);
+        aux_ray.pixel_coords = ray.pixel_coords;
+        aux_ray.depth = ray.depth;
+        f32 n, f;
+        AABB aabb;
+
+        if (geo.type == GeometryType_Mesh) {
+            aabb = meshes[geo.id].aabb;
+        } else {
+            aabb.max = geo.type == GeometryType_Tet ? TET_MAX : 1.0f;
+            aabb.min = -aabb.max.x;
+            if (geo.type == GeometryType_Quad) {
+                aabb.min.y = -EPS;
+                aabb.max.y = EPS;
+            }
+        }
+        if (!aux_ray.hitsAABB(aabb, n, f)) return false;
+
+        switch (geo.type) {
+            case GeometryType_Quad: return aux_ray.hitsDefaultQuad(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
+            case GeometryType_Box: return aux_ray.hitsDefaultBox(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
+            case GeometryType_Sphere: return aux_ray.hitsDefaultSphere(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
+            case GeometryType_Tet   : return aux_ray.hitsDefaultTetrahedron(hit, geo.flags & GEOMETRY_IS_TRANSPARENT);
+            case GeometryType_Mesh  : return mesh_tracer.trace(meshes[geo.id], aux_ray, hit, any_hit);
+            default: return false;
+        }
     }
 };

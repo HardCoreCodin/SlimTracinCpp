@@ -1,10 +1,9 @@
 #pragma once
 
-#include "../../core/ray.h"
-#include "../../core/texture.h"
-#include "../../scene/material.h"
-#include "../tracers/scene_tracer.h"
-#include "./light_shader.h"
+#include "../core/ray.h"
+#include "../core/texture.h"
+#include "../scene/material.h"
+#include "../scene/scene_tracer.h"
 
 
 INLINE_XPU Color sample(const Material &material, u8 slot, const Texture *textures, vec2 uv, f32 uv_coverage) {
@@ -35,15 +34,22 @@ struct SurfaceShader {
     Geometry *geometry = nullptr;
     Material *material = nullptr;
     Color F, albedo_from_map, Fs, Fd;
+    Ray shadow_ray;
+    RayHit shadow_hit;
     vec3 P, N, V, L, R, RF, H, emissive_quad_vertices[4];
     f32 Ld, Ld2, NdotL, NdotV, NdotH, HdotL, IOR;
-
     bool refracted = false;
 
-    INLINE_XPU void shadeFromLight(const Light &light, const Scene &scene, SceneTracer &tracer, Color &color) {
+    INLINE_XPU bool inShadow(const Scene &scene, SceneTracer &scene_tracer, const vec3 &origin, const vec3 &direction, float max_distance = INFINITY) {
+        shadow_ray.origin = origin;
+        shadow_ray.direction = direction;
+        return scene_tracer.trace(shadow_ray, shadow_hit, scene, true, max_distance);
+    }
+
+    INLINE_XPU void shadeFromLight(const Light &light, const Scene &scene, SceneTracer &scene_tracer, Color &color) {
         if (isFacingLight(light) && (
                 !(light.flags & Light_IsShadowing) ||
-                !tracer.inShadow(scene, P, L, Ld)
+                !inShadow(scene, scene_tracer, P, L, Ld)
             )
         ) {
             // color += fr(p, L, V) * Li(p, L) * cos(w)
@@ -53,6 +59,28 @@ struct SurfaceShader {
     }
 
     INLINE_XPU void prepareForShading(Ray &ray, RayHit &hit, Material *materials, const Texture *textures) {
+        // Finalize hit:
+        const vec2 &uv_repeat{materials[geometry->material_id].uv_repeat};
+        hit.uv *= uv_repeat;
+        if (hit.from_behind) hit.normal = -hit.normal;
+
+        // Compute uvs and uv-coverage using Ray Cones:
+        // Note: This is done while the hit is still in LOCAL space and using its LOCAL and PRE-NORMALIZED ray direction
+        hit.cone_width = hit.distance * hit.scaling_factor;
+        hit.cone_width *= hit.cone_width;
+        hit.cone_width *= hit.cone_width;
+        hit.uv_coverage *= hit.cone_width / (
+            uv_repeat.u *
+            uv_repeat.v *
+            hit.NdotRd *
+            abs((1.0f - hit.normal).dot(geometry->transform.scale))
+        );
+
+        // Convert Ray Hit to world space, using the "t" value from the local-space ray_tracer:
+        hit.position = ray[hit.distance];
+        hit.normal = geometry->transform.externDir(hit.normal); // Normalized
+
+
         material = materials + geometry->material_id;
         if (material->hasNormalMap())
             hit.normal = rotateNormal(
@@ -63,7 +91,7 @@ struct SurfaceShader {
 
         P = hit.position;
         N = hit.normal;
-        R = ray.direction.reflectedAround(N);
+        R = RF = ray.direction.reflectedAround(N);
         V = -ray.direction;
         NdotV = clampedValue(N.dot(V));
         albedo_from_map = material->hasAlbedoMap() ? sampleAlbedo(*material, hit, textures) : White;
@@ -73,7 +101,8 @@ struct SurfaceShader {
             IOR = hit.from_behind ? (material->IOR / IOR_AIR) : (IOR_AIR / material->IOR);
             f32 c = IOR*IOR * (1.0f - (NdotV * NdotV));
             refracted = c < 1.0f;
-            RF = refracted ? N.scaleAdd(IOR * NdotV - sqrtf(1 - c), ray.direction * IOR).normalized() : R;
+            if (refracted)
+                RF = N.scaleAdd(IOR * NdotV - sqrtf(1 - c), ray.direction * IOR).normalized();
         }
     }
 
@@ -130,14 +159,37 @@ struct SurfaceShader {
         return NdotL > 0.0f;
     }
 
-    INLINE_XPU bool shadeFromEmissiveQuads(const Scene &scene, Ray &shadow_ray, RayHit &shadow_hit, Color &color) {
+    INLINE_XPU vec3 getAreaLightVector(const Transform &transform) {
+        const f32 sx = transform.scale.x;
+        const f32 sz = transform.scale.z;
+        if (sx == 0 || sz == 0)
+            return 0.0f;
+
+        vec3 U{transform.orientation * vec3{sx < 0 ? -sx : sx, 0.0f, 0.0f}};
+        vec3 V{transform.orientation * vec3{0.0f, 0.0f , sz < 0 ? -sz : sz}};
+        emissive_quad_vertices[0] = transform.position - U - V;
+        emissive_quad_vertices[1] = transform.position + U - V;
+        emissive_quad_vertices[2] = transform.position + U + V;
+        emissive_quad_vertices[3] = transform.position - U + V;
+
+        vec3 u1n{(emissive_quad_vertices[0] - P).normalized()};
+        vec3 u2n{(emissive_quad_vertices[1] - P).normalized()};
+        vec3 u3n{(emissive_quad_vertices[2] - P).normalized()};
+        vec3 u4n{(emissive_quad_vertices[3] - P).normalized()};
+
+        return {
+            u1n.cross(u2n) * (acosf(u1n.dot(u2n)) * 0.5f) +
+            u2n.cross(u3n) * (acosf(u2n.dot(u3n)) * 0.5f) +
+            u3n.cross(u4n) * (acosf(u3n.dot(u4n)) * 0.5f) +
+            u4n.cross(u1n) * (acosf(u4n.dot(u1n)) * 0.5f)
+        };
+    }
+
+    INLINE_XPU bool shadeFromEmissiveQuads(const Scene &scene, Color &color) {
         bool found = false;
 
-        vec3 *v = emissive_quad_vertices;
         vec3 Ro;
         f32 Ld_rcp, sphere_squared_distance_To_center;
-
-//        if (geometry->type != GeometryType_Sphere) return false;
 
         Transform *xform;
         Geometry *shadowing_geo, *emissive_quad = scene.geometries;
@@ -165,11 +217,11 @@ struct SurfaceShader {
             if (shadow_ray.hitsDefaultQuad(shadow_hit, emissive_quad->flags & GEOMETRY_IS_TRANSPARENT))
                 found = true;
 
-            f32 emission_intensity = N.dot(getAreaLightVector(*xform, P, v));
+            f32 emission_intensity = N.dot(getAreaLightVector(*xform));
             if (emission_intensity > 0) {
                 bool skip = true;
-                for (u8 j = 0; j < 4; j++) {
-                    if (N.dot(v[j] - P) >= 0) {
+                for (const vec3 &vertex : emissive_quad_vertices) {
+                    if (N.dot(vertex - P) >= 0) {
                         skip = false;
                         break;
                     }

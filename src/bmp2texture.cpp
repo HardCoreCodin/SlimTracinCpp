@@ -243,25 +243,24 @@ int main(int argc, char *argv[]) {
     char* texture_file_path = argv[2];
     for (u8 i = 3; i < (u8)argc; i++) {
         if (     argv[i][0] == '-' && argv[i][1] == 'f') texture.flags.flip = true;
-        else if (argv[i][0] == '-' && argv[i][1] == 'c') texture.flags.channel = true;
         else if (argv[i][0] == '-' && argv[i][1] == 'l') texture.flags.linear = true;
         else if (argv[i][0] == '-' && argv[i][1] == 't') texture.flags.tile = true;
         else if (argv[i][0] == '-' && argv[i][1] == 'm') texture.flags.mipmap = true;
         else if (argv[i][0] == '-' && argv[i][1] == 'w') texture.flags.wrap = true;
         else if (argv[i][0] == '-' && argv[i][1] == 'n') texture.flags.normal = true;
-        else if (argv[i][0] == '-' && argv[i][1] == 'q') texture.flags.cubemap = true;
+        else if (argv[i][0] == '-' && argv[i][1] == 'c') texture.flags.cubemap = true;
         else return 0;
     }
 
     u8* components = loadBitmap(bitmap_file_path, texture);
     TextureMipLoader *loader_mips = nullptr;
 
+    texture.flags.channel = false;
     if (texture.flags.cubemap) {
         texture.flags.wrap = false;
         texture.flags.normal = false;
         texture.flags.mipmap = false;
         texture.flags.tile = false;
-        texture.flags.channel = false;
         texture.mip_count = 3;
 
         u32 face_width = texture.height;

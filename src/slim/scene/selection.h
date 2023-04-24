@@ -1,9 +1,11 @@
 #pragma once
 
 #include "./scene.h"
+#include "./scene_tracer.h"
 #include "../core/ray.h"
 #include "../core/transform.h"
 #include "../viewport/viewport.h"
+
 
 struct Selection {
     Transform xform;
@@ -42,7 +44,7 @@ struct Selection {
             // This is the first frame after the left mouse button went down:
             // Cast a ray onto the scene to find the closest object behind the hovered pixel:
 
-            if (scene.castRay(ray, hit, hit_geo_id, hit_light_id)) {
+            if (castRay(ray, hit, hit_geo_id, hit_light_id, scene)) {
                 // Track the object that is now selected and Detect if object scene->selection has changed:
                 if (hit_light_id >= 0) {
                     changed = light != (scene.lights + hit_light_id);
@@ -153,5 +155,59 @@ struct Selection {
                 }
             }
         }
+    }
+
+    INLINE bool castRay(Ray &ray, RayHit &hit, i32 &hit_geo_id, i32 &hit_light_id, const Scene &scene) const {
+        static Ray local_ray;
+        static RayHit local_hit;
+        static Transform xform;
+        bool found = false;
+        hit_geo_id = -1;
+        hit_light_id = -1;
+        hit.distance = local_hit.distance = INFINITY;
+
+        for (u32 i = 0; i < scene.counts.geometries; i++) {
+            Geometry &geo = scene.geometries[i];
+            xform = geo.transform;
+            if (geo.type == GeometryType_Mesh)
+                xform.scale *= scene.meshes[geo.id].aabb.max;
+
+            local_ray.localize(ray, xform);
+            if (local_ray.hitsDefaultBox(local_hit)) {
+                hit = local_hit;
+                hit_geo_id = i;
+                found = true;
+            }
+        }
+
+        if (scene.lights) {
+            for (u32 i = 0; i < scene.counts.lights; i++) {
+                Light &light = scene.lights[i];
+                if (light.flags & Light_IsDirectional)
+                    continue;
+
+                f32 light_radius = light.intensity * (1.0f / (8.0f * 16.0f));
+                xform.position = light.position_or_direction;
+                xform.scale = light_radius;
+                xform.orientation.reset();
+
+                local_hit.distance = INFINITY;
+                local_ray.localize(ray, xform);
+                if (local_ray.hitsDefaultSphere(local_hit)) {
+                    hit = local_hit;
+                    hit_geo_id = -1;
+                    hit_light_id = i;
+                    found = true;
+                }
+            }
+        }
+
+        if (found) {
+            hit.position = ray[hit.distance];
+            if (hit_geo_id >= 0)
+                hit.normal = scene.geometries[hit_geo_id].transform.externDir(hit.normal);
+        }
+
+        return found;
     }
 };
