@@ -16,26 +16,32 @@ void uploadMaterials(const Scene &scene) {}
 void uploadSceneBVH(const Scene &scene) {}
 #endif
 
-#define RAY_TRACER_DEFAULT_SETTINGS_SKYBOX_TEXTURE_ID -1
+#define RAY_TRACER_DEFAULT_SETTINGS_SKYBOX_TEXTURE_ID 1
 #define RAY_TRACER_DEFAULT_SETTINGS_MAX_DEPTH 3
 #define RAY_TRACER_DEFAULT_SETTINGS_RENDER_MODE RenderMode_Beauty
 
 
 struct RayTracingRenderer {
     Scene &scene;
-    RayTracer ray_tracer;
+    SceneTracer &scene_tracer;
+    CameraRayProjection &projection;
+
     RayTracerSettings settings;
-    RayTracerProjection projection;
+    SurfaceShader surface;
+    Ray ray;
+    RayHit hit;
+    Color color;
+    f32 depth;
 
     explicit RayTracingRenderer(Scene &scene,
+                                SceneTracer &scene_tracer,
+                                CameraRayProjection &projection,
                                 u8 max_depth = RAY_TRACER_DEFAULT_SETTINGS_MAX_DEPTH,
                                 char skybox_color_texture_id = -1,
                                 char skybox_radiance_texture_id = -1,
                                 char skybox_irradiance_texture_id = -1,
-                                RenderMode render_mode = RAY_TRACER_DEFAULT_SETTINGS_RENDER_MODE,
-                                memory::MonotonicAllocator *memory_allocator = nullptr) :
-              scene{scene}, ray_tracer{scene.counts.geometries, scene.mesh_stack_size, memory_allocator} {
-
+                                RenderMode render_mode = RAY_TRACER_DEFAULT_SETTINGS_RENDER_MODE) :
+                                scene{scene}, scene_tracer{scene_tracer}, projection{projection} {
         settings.skybox_color_texture_id = skybox_color_texture_id;
         settings.skybox_radiance_texture_id = skybox_radiance_texture_id;
         settings.skybox_irradiance_texture_id = skybox_irradiance_texture_id;
@@ -58,8 +64,7 @@ struct RayTracingRenderer {
         const Camera &camera = *viewport.camera;
         const Canvas &canvas = viewport.canvas;
 
-        ray_tracer.ray.origin = camera.position;
-        projection.reset(camera, canvas);
+        ray.origin = camera.position;
 
         if (update_scene) {
             scene.updateAABBs();
@@ -72,7 +77,7 @@ struct RayTracingRenderer {
             }
         }
 #ifdef __CUDACC__
-        if (use_GPU) renderOnGPU(canvas, &settings, &projection);
+        if (use_GPU) renderOnGPU(canvas, projection, settings);
         else         renderOnCPU(canvas);
 #else
         renderOnCPU(canvas);
@@ -80,24 +85,16 @@ struct RayTracingRenderer {
     }
 
     void renderOnCPU(const Canvas &canvas) {
-        const Dimensions &dim{canvas.dimensions};
-
-        f32 &Cx = ray_tracer.screen_center_to_pixel_center.x;
-        f32 &Cy = ray_tracer.screen_center_to_pixel_center.y;
-        i32 &x = ray_tracer.ray.pixel_coords.x;
-        i32 &y = ray_tracer.ray.pixel_coords.y;
-        i32 width = dim.width * (canvas.antialias == SSAA ? 2 : 1);
-        i32 height = dim.height * (canvas.antialias == SSAA ? 2 : 1);
-
-        vec3 direction;
-        Color color;
-
-        for (Cy = projection.Cy_start, y = 0; y < height;
-             Cy -= projection.sample_size, y++, projection.start += projection.down) {
-            for (direction = projection.start, Cx = projection.Cx_start, x = 0;  x < width;
-                 direction += projection.right, Cx += projection.sample_size, x++) {
-                ray_tracer.renderPixel(scene, settings, projection, direction, color);
-                canvas.setPixel(x, y, color, -1, ray_tracer.z_depth);
+        i32 width  = canvas.dimensions.width  * (canvas.antialias == SSAA ? 2 : 1);
+        i32 height = canvas.dimensions.height * (canvas.antialias == SSAA ? 2 : 1);
+        vec3 C, direction;
+        for (C.y = projection.C_start.y, ray.pixel_coords.y = 0; ray.pixel_coords.y < height;
+             C.y -= projection.sample_size, ray.pixel_coords.y++, projection.start += projection.down) {
+            for (direction = projection.start, C.x = projection.C_start.x, ray.pixel_coords.x = 0;  ray.pixel_coords.x < width;
+                 direction += projection.right, C.x += projection.sample_size, ray.pixel_coords.x++) {
+                hit.scaling_factor = 1.0f / sqrtf(C.squaredLength() + projection.squared_distance_to_projection_plane);
+                renderPixel(settings, projection, scene, scene_tracer, surface, ray, hit, direction, color, depth);
+                canvas.setPixel(ray.pixel_coords.x, ray.pixel_coords.y, color, -1, depth);
             }
         }
     }

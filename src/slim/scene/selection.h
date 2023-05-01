@@ -8,6 +8,12 @@
 
 
 struct Selection {
+    Scene &scene;
+    SceneTracer &scene_tracer;
+    CameraRayProjection &projection;
+    Ray ray, local_ray;
+    RayHit hit, local_ray_hit;
+
     Transform xform;
     quat object_rotation;
     vec3 transformation_plane_origin,
@@ -24,50 +30,73 @@ struct Selection {
     bool changed = false;
     bool left_mouse_button_was_pressed = false;
 
-    void manipulate(const Viewport &viewport, const Scene &scene) {
-        static Ray ray, local_ray;
-        static RayHit hit, local_ray_hit;
+    Selection(Scene &scene, SceneTracer &scene_tracer, CameraRayProjection &projection) :
+        scene{scene}, scene_tracer{scene_tracer}, projection{projection} {}
 
+    void manipulate(const Viewport &viewport) {
         const Dimensions &dimensions = viewport.dimensions;
         Camera &camera = *viewport.camera;
         i32 x = mouse::pos_x - viewport.bounds.left;
         i32 y = mouse::pos_y - viewport.bounds.top;
-        f32 normalization_factor = 2.0f / dimensions.f_height;
-
-        ray.origin = camera.position;
-        ray.direction = camera.getRayDirectionAt(x, y, dimensions.width_over_height, normalization_factor);
-        hit.distance = local_ray_hit.distance = INFINITY;
-        i32 hit_geo_id = -1;
-        i32 hit_light_id = -1;
+        vec3 new_origin{camera.position};
+        vec3 new_direction{projection.getRayDirectionAt(x, y).normalized()};
 
         if (mouse::left_button.is_pressed && !left_mouse_button_was_pressed && !controls::is_pressed::alt) {
             // This is the first frame after the left mouse button went down:
             // Cast a ray onto the scene to find the closest object behind the hovered pixel:
+            ray.reset(new_origin, new_direction);
+            Geometry *hit_geo = scene_tracer.trace(ray, hit, scene);
+            Light *hit_light = nullptr;
+            Light *current_light = scene.lights;
+            if (scene.lights)
+                for (u32 i = 0; i < scene.counts.lights; i++, current_light++)
+                    if (current_light->isPoint() &&
+                        scene_tracer.light_tracer.hit(
+                            current_light->position_or_direction,
+                            current_light->intensity * 0.5f * LIGHT_INTENSITY_RADIUS_FACTOR,
+                            LIGHT_RADIUS_INTENSITY_FACTOR / (current_light->intensity * 0.5f),
+                            ray.origin,
+                            ray.direction,
+                            hit.distance
+                        ))
+                        hit_light = current_light;
 
-            if (castRay(ray, hit, hit_geo_id, hit_light_id, scene)) {
-                // Track the object that is now selected and Detect if object scene->selection has changed:
-                if (hit_light_id >= 0) {
-                    changed = light != (scene.lights + hit_light_id);
-                    geometry = nullptr;
-                    light = scene.lights + hit_light_id;
-                    world_position = &light->position_or_direction;
-                } else {
-                    changed = geometry != (scene.geometries + hit_geo_id);
-                    light = nullptr;
-                    geometry = scene.geometries + hit_geo_id;
-                    world_position = &geometry->transform.position;
-                }
+            if (hit_light) {
+                light = hit_light;
+                geometry = nullptr;
 
                 // Capture a pointer to the selected object's position for later use in transformations:
-                transformation_plane_origin = hit.position;
-                world_offset = hit.position - *world_position;
+                world_position = &light->position_or_direction;
+
+                xform.position = light->position_or_direction;
+                xform.scale = light->intensity * 0.5f * LIGHT_INTENSITY_RADIUS_FACTOR;
+                xform.orientation.reset();
+            } else {
+                light = nullptr;
+                if (hit_geo) {
+                    geometry = hit_geo;
+
+                    xform = geometry->transform;
+                    if (geometry->type == GeometryType_Mesh)
+                        xform.scale *= scene.meshes[geometry->id].aabb.max;
+
+                    // Capture a pointer to the selected object's position for later use in transformations:
+                    world_position = &geometry->transform.position;
+                } else
+                    geometry = nullptr;
+            }
+
+            changed = geometry != hit_geo || light != hit_light;
+
+            if (hit_geo || hit_light) {
+                local_ray_hit.distance = INFINITY;
+                local_ray.localize(ray, xform);
+                local_ray.hitsDefaultBox(local_ray_hit);
+                transformation_plane_origin = xform.externPos(local_ray_hit.position);
+                world_offset = transformation_plane_origin - *world_position;
 
                 // Track how far away the hit position is from the camera along the depth axis:
-                object_distance = (camera.orientation.transposed() * (hit.position - ray.origin)).z;
-            } else {
-                if (geometry || light) changed = true;
-                geometry = nullptr;
-                light = nullptr;
+                object_distance = (camera.orientation.transposed() * (transformation_plane_origin - ray.origin)).z;
             }
         }
         left_mouse_button_was_pressed = mouse::left_button.is_pressed;
@@ -85,25 +114,26 @@ struct Selection {
                             xform.scale *= scene.meshes[geometry->id].aabb.max;
                     } else {
                         xform.position = light->position_or_direction;
-                        xform.scale = light->intensity / 64;
+                        xform.scale = light->intensity * 0.5f * LIGHT_INTENSITY_RADIUS_FACTOR;
                         xform.orientation.reset();
                     }
 
+                    ray.reset(new_origin, new_direction);
                     local_ray.localize(ray, xform);
+                    local_ray_hit.distance = INFINITY;
                     box_side = local_ray.hitsDefaultBox(local_ray_hit);
                     if (box_side) {
-                        transformation_plane_center = xform.externPos(local_ray_hit.normal);
                         transformation_plane_origin = xform.externPos(local_ray_hit.position);
-                        transformation_plane_normal = xform.externDir(local_ray_hit.normal);
-                        transformation_plane_normal = transformation_plane_normal.normalized();
+                        transformation_plane_center = xform.externPos(local_ray_hit.normal);
+                        transformation_plane_normal = xform.externDir(local_ray_hit.normal).normalized();
                         world_offset = transformation_plane_origin - *world_position;
-                        object_scale    = xform.scale;
+                        object_scale    = geometry ? geometry->transform.scale : xform.scale;
                         object_rotation = xform.orientation;
                     }
                 }
 
                 if (any_mouse_button_is_pressed && box_side) {
-                    ray.reset(ray.origin, ray.direction);
+                    ray.reset(new_origin, new_direction);
                     if (ray.hitsPlane(transformation_plane_origin, transformation_plane_normal, hit)) {
                         if (geometry) {
                             xform = geometry->transform;
@@ -111,24 +141,38 @@ struct Selection {
                                 xform.scale *= scene.meshes[geometry->id].aabb.max;
                         } else {
                             xform.position = light->position_or_direction;
-                            xform.scale = light->intensity / 64;
+                            xform.scale = light->intensity * 0.5f * LIGHT_INTENSITY_RADIUS_FACTOR;
                             xform.orientation.reset();
                         }
 
                         if (mouse::left_button.is_pressed) {
                             *world_position = hit.position - world_offset;
                         } else if (mouse::middle_button.is_pressed) {
-                            hit.position = xform.internPos(hit.position) / xform.internPos(transformation_plane_origin);
-
-                            if (geometry)
-                                geometry->transform.scale = object_scale * hit.position;
-                            else {
-                                if (box_side == BoxSide_Top || box_side == BoxSide_Bottom)
-                                    hit.position.x = hit.position.z > 0 ? hit.position.z : -hit.position.z;
-                                else
-                                    hit.position.x = hit.position.y > 0 ? hit.position.y : -hit.position.y;
-                                light->intensity = (object_scale.x * 64) * hit.position.x;
+                            vec3 abs_pos{absolute(xform.internPos(hit.position))};
+                            vec3 abs_org{absolute(xform.internPos(transformation_plane_origin))};
+                            vec3 scale_diff{abs_pos - abs_org};
+                            switch (box_side) {
+                                case BoxSide_Left:
+                                case BoxSide_Right: scale_diff.x = abs_pos.x = abs_org.x = 0.0f; break;
+                                case BoxSide_Bottom:
+                                case BoxSide_Top: scale_diff.y = abs_pos.y = abs_org.y = 0.0f; break;
+                                default: scale_diff.z = abs_pos.z = abs_org.z =  0.0f;
                             }
+                            if (geometry) {
+                                geometry->transform.scale = object_scale + scale_diff * geometry->transform.scale;
+                                geometry->transform.scale.x = abs(geometry->transform.scale.x);
+                                geometry->transform.scale.y = abs(geometry->transform.scale.y);
+                                geometry->transform.scale.z = abs(geometry->transform.scale.z);
+                            } else if (light) {
+                                light->intensity = abs(
+                                    LIGHT_RADIUS_INTENSITY_FACTOR * 2.0f * (
+                                        object_scale.x + (
+                                            (abs_pos.length() - abs_org.length()) * (light->intensity * LIGHT_INTENSITY_RADIUS_FACTOR * 0.5f)
+                                        )
+                                    )
+                                );
+                            }
+
                         } else if (mouse::right_button.is_pressed && geometry) {
                             vec3 v1{ hit.position - transformation_plane_center };
                             vec3 v2{ transformation_plane_origin - transformation_plane_center };
@@ -155,59 +199,5 @@ struct Selection {
                 }
             }
         }
-    }
-
-    INLINE bool castRay(Ray &ray, RayHit &hit, i32 &hit_geo_id, i32 &hit_light_id, const Scene &scene) const {
-        static Ray local_ray;
-        static RayHit local_hit;
-        static Transform xform;
-        bool found = false;
-        hit_geo_id = -1;
-        hit_light_id = -1;
-        hit.distance = local_hit.distance = INFINITY;
-
-        for (u32 i = 0; i < scene.counts.geometries; i++) {
-            Geometry &geo = scene.geometries[i];
-            xform = geo.transform;
-            if (geo.type == GeometryType_Mesh)
-                xform.scale *= scene.meshes[geo.id].aabb.max;
-
-            local_ray.localize(ray, xform);
-            if (local_ray.hitsDefaultBox(local_hit)) {
-                hit = local_hit;
-                hit_geo_id = i;
-                found = true;
-            }
-        }
-
-        if (scene.lights) {
-            for (u32 i = 0; i < scene.counts.lights; i++) {
-                Light &light = scene.lights[i];
-                if (light.flags & Light_IsDirectional)
-                    continue;
-
-                f32 light_radius = light.intensity * (1.0f / (8.0f * 16.0f));
-                xform.position = light.position_or_direction;
-                xform.scale = light_radius;
-                xform.orientation.reset();
-
-                local_hit.distance = INFINITY;
-                local_ray.localize(ray, xform);
-                if (local_ray.hitsDefaultSphere(local_hit)) {
-                    hit = local_hit;
-                    hit_geo_id = -1;
-                    hit_light_id = i;
-                    found = true;
-                }
-            }
-        }
-
-        if (found) {
-            hit.position = ray[hit.distance];
-            if (hit_geo_id >= 0)
-                hit.normal = scene.geometries[hit_geo_id].transform.externDir(hit.normal);
-        }
-
-        return found;
     }
 };

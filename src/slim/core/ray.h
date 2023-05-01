@@ -314,7 +314,7 @@ struct Ray {
 struct SphereTracer {
     f32 b, c, t_near, t_far, t_max;
 
-    INLINE_XPU bool hit(const vec3 &center, f32 one_over_radius, const vec3 &Ro, const vec3 &Rd, f32 max_distance) {
+    INLINE_XPU bool hit(const vec3 &center, f32 radius, f32 one_over_radius, const vec3 &Ro, const vec3 &Rd, f32 &max_distance) {
         t_max = max_distance * one_over_radius;
         vec3 rc{(center - Ro) * one_over_radius};
 
@@ -322,13 +322,26 @@ struct SphereTracer {
         c = rc.squaredLength() - 1;
         f32 h = b*b - c;
 
-        if (h < 0)
-            return false;
+        if (h >= 0) {
+            h = sqrtf(h);
+            t_near = b - h;
+            t_far  = b + h;
+            if (t_far > 0 && t_near < t_max) {
+                max_distance = t_max * radius;
+                return true;
+            }
+        }
 
-        h = sqrtf(h);
-        t_near = b - h;
-        t_far  = b + h;
+        return false;
+    }
 
-        return t_far > 0 && t_near < t_max;
+    INLINE_XPU f32 integrateDensity() {
+        f32 tn = Max(t_near, 0);
+        f32 tf = Min(t_far, t_max);
+        f32 tn2 = tn*tn;
+        f32 tf2 = tf*tf;
+        return (c*tn - b*tn2 + tn*tn2/3.0f - (
+                c*tf - b*tf2 + tf*tf2/3.0f   ))
+                * (3.0f / 4.0f);
     }
 };

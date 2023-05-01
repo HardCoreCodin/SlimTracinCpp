@@ -15,7 +15,7 @@ void drawSelection(Selection &selection, const Viewport &viewport, const Scene &
                 selection.xform.scale *= scene.meshes[selection.geometry->id].aabb.max;
         } else {
             selection.xform.position = selection.light->position_or_direction;
-            selection.xform.scale = selection.light->intensity / 64;
+            selection.xform.scale = selection.light->intensity * 0.5f * LIGHT_INTENSITY_RADIUS_FACTOR;
             selection.xform.orientation.reset();
         }
 

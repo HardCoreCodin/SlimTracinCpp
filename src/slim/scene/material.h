@@ -4,6 +4,9 @@
 #include "../math/vec3.h"
 #include "../math/quat.h"
 
+#define LIGHT_RADIUS_INTENSITY_FACTOR 64.0f
+#define LIGHT_INTENSITY_RADIUS_FACTOR (1.0f / LIGHT_RADIUS_INTENSITY_FACTOR)
+
 enum LightFlags {
     Light_None,
 
@@ -16,6 +19,9 @@ struct Light {
     vec3 position_or_direction{};
     f32 intensity = 1.0f;
     u8 flags = Light_IsShadowing;
+
+    INLINE_XPU bool isDirectional() const { return flags & Light_IsDirectional; }
+    INLINE_XPU bool isPoint() const { return !(isDirectional()); }
 };
 
 INLINE_XPU f32 ggxTrowbridgeReitz_D(f32 roughness, f32 NdotH) { // NDF

@@ -44,24 +44,6 @@ struct Camera {
         position += orientation.up * up_amount + orientation.right * right_amount;
     }
 
-    INLINE_XPU vec3 getTopLeftCornerOfProjectionPlane(f32 aspect_ratio) const {
-        return orientation.forward.scaleAdd(focal_length, orientation.right.scaleAdd(-aspect_ratio, orientation.up));
-    }
-
-    INLINE_XPU vec3 getRayDirectionAt(i32 x, i32 y, f32 aspect_ratio, f32 normalization_factor, bool use_pixel_centers = true) const {
-        f32 X = (f32)x * normalization_factor;
-        f32 Y = (f32)y * normalization_factor;
-        vec3 start = getTopLeftCornerOfProjectionPlane(aspect_ratio);
-
-        if (use_pixel_centers) {
-            normalization_factor *= 0.5f;
-            start += orientation.right * normalization_factor;
-            start -= orientation.up * normalization_factor;
-        }
-
-        return orientation.right.scaleAdd(X, orientation.up.scaleAdd(-Y, start)).normalized();
-    }
-
     INLINE_XPU vec3 internPos(const vec3 &pos) const { return _unrotate(_untranslate(pos)); }
     INLINE_XPU vec3 internDir(const vec3 &dir) const { return _unrotate(dir); }
     INLINE_XPU vec3 externPos(const vec3 &pos) const { return _translate(_rotate(pos)); }
@@ -72,4 +54,31 @@ private:
     INLINE_XPU vec3 _unrotate(const vec3 &pos) const { return orientation.transposed() * pos; }
     INLINE_XPU vec3 _translate(const vec3 &pos) const { return pos + position; }
     INLINE_XPU vec3 _untranslate(const vec3 &pos) const { return pos - position; }
+};
+
+struct CameraRayProjection {
+    mat3 inverted_camera_rotation;
+    vec3 start, right, down, camera_position;
+    vec2 C_start;
+    f32 squared_distance_to_projection_plane;
+    f32 sample_size;
+
+    INLINE_XPU f32 getDepthAt(vec3 &position) const { return (inverted_camera_rotation * (position - camera_position)).z; }
+    INLINE_XPU vec3 getRayDirectionAt(i32 x, i32 y) const { return start + down*y + right*x; }
+
+    void reset(const Camera &camera, const Dimensions &dim, bool antialias) {
+        sample_size = antialias ? 0.5f : 1.0f;
+        squared_distance_to_projection_plane = dim.h_height * camera.focal_length;
+        C_start.x = (sample_size * 0.5f) - dim.h_width;
+        C_start.y = dim.h_height - (sample_size * 0.5f);
+
+        inverted_camera_rotation = camera.orientation.inverted();
+        camera_position = camera.position;
+        down = -camera.orientation.up      * sample_size;
+        right = camera.orientation.right   * sample_size;
+        start = camera.orientation.right   * C_start.x +
+                camera.orientation.up      * C_start.y +
+                camera.orientation.forward * squared_distance_to_projection_plane;
+        squared_distance_to_projection_plane *= squared_distance_to_projection_plane;
+    }
 };

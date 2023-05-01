@@ -23,6 +23,7 @@ struct ExampleApp : SlimApp {
 
     // Viewport:
     Camera camera{{-25 * DEG_TO_RAD, 0, 0}, {0, 25, -45}}, *cameras{&camera};
+    CameraRayProjection projection;
     Canvas canvas;
     Viewport viewport{canvas, &camera};
 
@@ -42,26 +43,23 @@ struct ExampleApp : SlimApp {
 
     Scene scene{{1,1,3,1,TextureCount},
                 geometries, cameras, lights, materials, textures, texture_files};
-    Selection selection;
+    SceneTracer scene_tracer{scene.counts.geometries, scene.mesh_stack_size};
 
-    RayTracingRenderer renderer{scene,
-                                1,
+    Selection selection{scene, scene_tracer, projection};
+    RayTracingRenderer renderer{scene, scene_tracer, projection, 1,
                                 Cathedral_SkyboxColor,
                                 Cathedral_SkyboxRadiance,
                                 Cathedral_SkyboxIrradiance};
 
     void OnUpdate(f32 delta_time) override {
+        projection.reset(camera, canvas.dimensions, canvas.antialias == SSAA);
+
         i32 fps = (i32)render_timer.average_frames_per_second;
         FPS.value = fps;
-        FPS.value_color = fps >= 60 ? Green : (
-            fps >= 24 ? Cyan : (fps < 12 ? Red : Yellow)
-        );
+        FPS.value_color = fps >= 60 ? Green : (fps >= 24 ? Cyan : (fps < 12 ? Red : Yellow));
 
-        if (!mouse::is_captured)
-            selection.manipulate(viewport, scene);
-
-        if (!controls::is_pressed::alt)
-            viewport.updateNavigation(delta_time);
+        if (!mouse::is_captured) selection.manipulate(viewport);
+        if (!controls::is_pressed::alt) viewport.updateNavigation(delta_time);
     }
 
     void OnRender() override {

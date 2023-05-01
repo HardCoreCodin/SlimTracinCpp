@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ray_tracer.h"
-#include "surface_shader.h"
+#include "./ray_tracer.h"
+#include "./surface_shader.h"
 
 
 #define USE_GPU_BY_DEFAULT true
@@ -11,8 +11,6 @@
 
 __constant__ SceneData d_scene;
 __constant__ CanvasData d_canvas;
-__constant__ RayTracerSettings d_settings;
-__constant__ u8 d_projection_buffer[sizeof(RayTracerProjection)];
 
 SceneData t_scene;
 CanvasData t_canvas;
@@ -21,41 +19,36 @@ Triangle *d_triangles;
 TextureMip *d_texture_mips;
 TexelQuad *d_texel_quads;
 
-__global__ void d_render() {
+__global__ void d_render(const RayTracerSettings settings, const CameraRayProjection projection) {
     u32 s = d_canvas.antialias == SSAA ? 2 : 1;
     u32 i = blockDim.x * blockIdx.x + threadIdx.x;
-    if (i >= (d_canvas.dimensions.width_times_height * s * 2))
+    if (i >= (d_canvas.dimensions.width_times_height * s * s))
         return;
 
     u32 scene_stack[SCENE_BVH_STACK_SIZE], mesh_stack[MESH_BVH_STACK_SIZE];
-    RayTracer ray_tracer{scene_stack, mesh_stack};
-    Scene &scene{*((Scene*)(&d_scene))};
-    Canvas &canvas{*((Canvas*)(&d_canvas))};
-    RayTracerProjection &projection{*(RayTracerProjection*)(&d_projection_buffer[0])};
+    SceneTracer scene_tracer{scene_stack, mesh_stack};
+    SurfaceShader surface;
+    Ray ray;
+    RayHit hit;
+    Color color;
+    f32 depth;
 
-    u32 width = (u32)d_canvas.dimensions.width * s;
-    ray_tracer.ray.pixel_coords.x = (i32)(i % width);
-    ray_tracer.ray.pixel_coords.y = (i32)(i / width);
-    ray_tracer.screen_center_to_pixel_center.x = projection.Cx_start + ((f32)ray_tracer.ray.pixel_coords.x * projection.sample_size);
-    ray_tracer.screen_center_to_pixel_center.y = projection.Cy_start - ((f32)ray_tracer.ray.pixel_coords.y * projection.sample_size);
+    ray.pixel_coords.x = (i32)(i % ((u32)d_canvas.dimensions.width * s));
+    ray.pixel_coords.y = (i32)(i / ((u32)d_canvas.dimensions.width * s));
+    hit.scaling_factor = 1.0f / sqrtf(projection.squared_distance_to_projection_plane +
+        vec2{ray.pixel_coords.x,
+            -ray.pixel_coords.y}.scaleAdd(projection.sample_size,projection.C_start).squaredLength());
 
-    Color color{};
-    vec3 direction{
-        projection.start +
-        projection.down  * ray_tracer.ray.pixel_coords.y +
-        projection.right * ray_tracer.ray.pixel_coords.x
-    };
-    ray_tracer.renderPixel(scene, d_settings, projection, direction,  color);
+    renderPixel(settings, projection, *((Scene*)(&d_scene)), scene_tracer, surface, ray, hit,
+                projection.getRayDirectionAt(ray.pixel_coords.x, ray.pixel_coords.y), color, depth);
 
-    canvas.setPixel(ray_tracer.ray.pixel_coords.x, ray_tracer.ray.pixel_coords.y, color, -1, ray_tracer.z_depth);
+    ((Canvas*)(&d_canvas))->setPixel(ray.pixel_coords.x, ray.pixel_coords.y, color, -1, depth);
 }
 
-void renderOnGPU(const Canvas &canvas, const RayTracerSettings *settings, const RayTracerProjection *projection) {
+void renderOnGPU(const Canvas &canvas, const CameraRayProjection &projection, const RayTracerSettings &settings) {
     t_canvas.dimensions = canvas.dimensions;
     t_canvas.antialias = canvas.antialias;
     uploadConstant(&t_canvas, d_canvas)
-    uploadConstant(settings, d_settings)
-    uploadConstant((u8*)projection, d_projection_buffer)
 
     u32 pixel_count = canvas.dimensions.width_times_height * (canvas.antialias == SSAA ? 4 : 1);
     u32 depths_count = canvas.dimensions.width_times_height * (canvas.antialias == NoAA ? 1 : 4);
@@ -67,7 +60,7 @@ void renderOnGPU(const Canvas &canvas, const RayTracerSettings *settings, const 
     } else if (pixel_count % threads)
         blocks++;
 
-    d_render<<<blocks, threads>>>();
+    d_render<<<blocks, threads>>>(settings, projection);
 
     checkErrors()
     downloadN(t_canvas.pixels, canvas.pixels, pixel_count)
